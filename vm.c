@@ -75,6 +75,10 @@ static rb_serial_t ruby_vm_global_method_state = 1;
 static rb_serial_t ruby_vm_global_constant_state = 1;
 static rb_serial_t ruby_vm_class_serial = 1;
 
+rb_serial_t *ruby_vm_global_method_state_ptr   = &ruby_vm_global_method_state;
+rb_serial_t *ruby_vm_global_constant_state_ptr = &ruby_vm_global_constant_state;
+
+#include "jit/jit.h"
 #include "vm_insnhelper.h"
 #include "vm_insnhelper.c"
 #include "vm_exec.h"
@@ -1810,9 +1814,12 @@ ruby_vm_destruct(rb_vm_t *vm)
 	    rb_objspace_free(objspace);
 	}
 #endif
+        void jit_disable();
+        jit_disable();
 	/* after freeing objspace, you *can't* use ruby_xfree() */
 	ruby_mimfree(vm);
 	ruby_current_vm = 0;
+        void jit_disable();
     }
     RUBY_FREE_LEAVE("vm");
     return 0;
@@ -2742,6 +2749,9 @@ Init_VM(void)
 	rb_define_global_const("TOPLEVEL_BINDING", rb_binding_new());
     }
     vm_init_redefined_flag();
+
+    /* JIT bootstrap */
+    jit_init();
 
     /* vm_backtrace.c */
     Init_vm_backtrace();

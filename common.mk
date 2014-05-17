@@ -94,6 +94,7 @@ COMMONOBJS    = array.$(OBJEXT) \
 		vm_dump.$(OBJEXT) \
 		vm_backtrace.$(OBJEXT) \
 		vm_trace.$(OBJEXT) \
+		jit.$(OBJEXT) \
 		thread.$(OBJEXT) \
 		cont.$(OBJEXT) \
 		$(BUILTIN_ENCOBJS) \
@@ -823,7 +824,7 @@ vm.$(OBJEXT): {$(VPATH)}vm.c {$(VPATH)}gc.h {$(VPATH)}iseq.h \
   $(VM_CORE_H_INCLUDES) {$(VPATH)}vm_method.c {$(VPATH)}vm_eval.c \
   {$(VPATH)}vm_insnhelper.c {$(VPATH)}vm_insnhelper.h {$(VPATH)}vm_exec.c \
   {$(VPATH)}vm_exec.h {$(VPATH)}insns.def {$(VPATH)}vmtc.inc \
-  {$(VPATH)}vm.inc {$(VPATH)}insns.inc \
+  {$(VPATH)}vm.inc {$(VPATH)}insns.inc {$(VPATH)}jit/jit.h \
   {$(VPATH)}internal.h {$(VPATH)}vm.h {$(VPATH)}constant.h \
   $(PROBES_H_INCLUDES) {$(VPATH)}probes_helper.h {$(VPATH)}vm_opts.h
 vm_dump.$(OBJEXT): {$(VPATH)}vm_dump.c $(RUBY_H_INCLUDES) \
@@ -847,6 +848,16 @@ golf_prelude.$(OBJEXT): {$(VPATH)}golf_prelude.c $(RUBY_H_INCLUDES) \
   $(VM_CORE_H_INCLUDES) {$(VPATH)}internal.h {$(VPATH)}vm_opts.h
 goruby.$(OBJEXT): {$(VPATH)}goruby.c {$(VPATH)}main.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}vm_debug.h {$(VPATH)}node.h $(hdrdir)/ruby.h
+
+gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb
+	$(ECHO) creating $@
+	$(Q) $(BASERUBY) "$(srcdir)/jit/gwir.rb" $(srcdir)/jit/gwir.def > $@
+
+jit.$(OBJEXT): {$(VPATH)}jit/jit.c {$(VPATH)}jit/kmap.c {$(VPATH)}jit/jit_opts.h \
+	{$(VPATH)}jit/ir.c {$(VPATH)}jit/record.c  {$(VPATH)}jit/snapshot.c \
+	{$(VPATH)}jit/cgen.c {$(VPATH)}gwir.c
+	@$(ECHO) compiling $<
+	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c $<
 
 ascii.$(OBJEXT): {$(VPATH)}ascii.c {$(VPATH)}regenc.h {$(VPATH)}config.h \
   {$(VPATH)}oniguruma.h {$(VPATH)}missing.h $(RUBY_H_INCLUDES)

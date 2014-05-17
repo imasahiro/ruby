@@ -1043,6 +1043,31 @@ class RubyVM
   end
 
   ###################################################################
+  # vmrecord.inc
+  class VMRecordGenerator < SourceCodeGenerator
+    def generate
+      records = build_string do
+        @insns.each{|insn|
+          commit <<-EOS
+          static void record_#{insn.name}(rb_thread_t *th, rb_control_frame_t *reg_cfp, VALUE *reg_pc) {
+            not_support_op("#{insn.name}");
+          }
+          EOS
+        }
+      end
+
+      record_funcs = build_string do
+        @insns.each{|insn|
+          commit " record_%s," % [insn.name]
+        }
+      end
+
+      ERB.new(vpath.read('template/vmrecord.inc.tmpl')).result(binding)
+    end
+  end
+
+
+  ###################################################################
   # minsns.inc
   class MInsnsIncGenerator < SourceCodeGenerator
     def generate
@@ -1270,6 +1295,7 @@ class RubyVM
       'optunifs.inc'   => OptUnifsIncGenerator,
       'opt_sc.inc'     => OptSCIncGenerator,
       'yasmdata.rb'    => YASMDataRbGenerator,
+      'vmrecord.inc'   => VMRecordGenerator,
     }
 
     def generate args = []

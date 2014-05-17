@@ -1,0 +1,141 @@
+# guard operator
+GuardTypeFixnum       :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeFloat        :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeFlonum       :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeSpecialConst :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeArray        :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeString       :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeHash         :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeRegexp       :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeObject       :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeNil          :use (Exit:VALUEPtr, R:reg_t)
+GuardTypeNonNil       :use (Exit:VALUEPtr, R:reg_t)
+GuardObjectEqual      :use (Exit:VALUEPtr, R:reg_t, Obj:VALUE)
+GuardProperty         :use (Exit:VALUEPtr, R:reg_t, is_attr:int, cache:voidPtr)
+GuardMethodCache      :use (Exit:VALUEPtr, R:reg_t, ci:CALL_INFO)
+GuardMethodRedefine        (Exit:VALUEPtr, klass:VALUE, bop:int)
+
+# fixnum operator
+FixnumAdd         :def :use (LHS:reg_t, RHS:reg_t)
+FixnumSub         :def :use (LHS:reg_t, RHS:reg_t)
+FixnumMul         :def :use (LHS:reg_t, RHS:reg_t)
+FixnumDiv         :def :use (LHS:reg_t, RHS:reg_t)
+FixnumMod         :def :use (LHS:reg_t, RHS:reg_t)
+FixnumAddOverflow :def :use (LHS:reg_t, RHS:reg_t)
+FixnumSubOverflow :def :use (LHS:reg_t, RHS:reg_t)
+FixnumMulOverflow :def :use (LHS:reg_t, RHS:reg_t)
+FixnumDivOverflow :def :use (LHS:reg_t, RHS:reg_t)
+FixnumModOverflow :def :use (LHS:reg_t, RHS:reg_t)
+FixnumEq          :def :use (LHS:reg_t, RHS:reg_t)
+FixnumNe          :def :use (LHS:reg_t, RHS:reg_t)
+FixnumGt          :def :use (LHS:reg_t, RHS:reg_t)
+FixnumGe          :def :use (LHS:reg_t, RHS:reg_t)
+FixnumLt          :def :use (LHS:reg_t, RHS:reg_t)
+FixnumLe          :def :use (LHS:reg_t, RHS:reg_t)
+FixnumAnd         :def :use (LHS:reg_t, RHS:reg_t)
+FixnumOr          :def :use (LHS:reg_t, RHS:reg_t)
+FixnumXor         :def :use (LHS:reg_t, RHS:reg_t)
+FixnumLshift      :def :use (LHS:reg_t, RHS:reg_t)
+FixnumRshift      :def :use (LHS:reg_t, RHS:reg_t)
+FixnumComplement  :def :use (Recv:reg_t)
+
+# float operator
+FloatAdd :def :use (LHS:reg_t, RHS:reg_t)
+FloatSub :def :use (LHS:reg_t, RHS:reg_t)
+FloatMul :def :use (LHS:reg_t, RHS:reg_t)
+FloatDiv :def :use (LHS:reg_t, RHS:reg_t)
+FloatMod :def :use (LHS:reg_t, RHS:reg_t)
+FloatEq  :def :use (LHS:reg_t, RHS:reg_t)
+FloatNe  :def :use (LHS:reg_t, RHS:reg_t)
+FloatGt  :def :use (LHS:reg_t, RHS:reg_t)
+FloatGe  :def :use (LHS:reg_t, RHS:reg_t)
+FloatLt  :def :use (LHS:reg_t, RHS:reg_t)
+FloatLe  :def :use (LHS:reg_t, RHS:reg_t)
+
+# Converter
+FixnumToFloat  :def :use (Val:reg_t)
+FixnumToString :def :use (Val:reg_t)
+FloatToFixnum  :def :use (Val:reg_t)
+FloatToString  :def :use (Val:reg_t)
+StringToFixnum :def :use (Val:reg_t)
+StringToFloat  :def :use (Val:reg_t)
+
+# Math API
+MathSin   :def :use (Recv:reg_t)
+MathCos   :def :use (Recv:reg_t)
+MathTan   :def :use (Recv:reg_t)
+MathExp   :def :use (Recv:reg_t)
+MathSqrt  :def :use (Recv:reg_t)
+MathLog10 :def :use (Recv:reg_t)
+MathLog2  :def :use (Recv:reg_t)
+
+# string operator
+StringLength :def :use (Recv:reg_t)
+StringEmptyP :def :use (Recv:reg_t)
+StringConcat :def :use (Recv:reg_t)
+
+# array operator
+ArrayLength :def :use (Recv:reg_t)
+ArrayEmptyP :def :use (Recv:reg_t)
+ArrayConcat :def :use (Recv:reg_t)
+ArrayGet    :def :use (Recv:reg_t, Index:reg_t)
+ArraySet    :def :use (Recv:reg_t, Index:reg_t, Val:reg_t)
+
+# hash operator
+HashLength :def :use (Recv:reg_t)
+HashEmptyP :def :use (Recv:reg_t)
+HashGet    :def :use (Recv:reg_t, Index:reg_t)
+HashSet    :def :use (Recv:reg_t, Index:reg_t, Val:reg_t)
+
+# regexp operator
+RegExpMatch :def :use (Re:reg_t, Str:reg_t)
+
+# alloc instruction
+AllocArray  :def      (argc:int, argv:reg_t[])
+AllocHash   :def      (argc:int, argv:reg_t[])
+AllocString :def :use (OrigStr:reg_t)
+AllocRange  :def :use (Low:reg_t, High:reg_t, Flag:int)
+
+# load/store global variable
+GetGlobal :def :use (Entry:reg_t)
+SetGlobal      :use (Entry:reg_t, Val:reg_t)
+
+# load/store instance variable
+GetPropertyName :def :use (Recv:reg_t, Index:long)
+SetPropertyName :def :use (Recv:reg_t, Index:long, Val:reg_t)
+
+# constant object instruction
+LoadConstNil     :def ()
+LoadConstObject  :def (Val:VALUE)
+LoadConstFixnum  :def (Val:VALUE)
+LoadConstFloat   :def (Val:VALUE)
+LoadConstString  :def (Val:VALUE)
+
+# load special object instruction
+LoadSelf        :def ()
+LoadSelfAsBlock :def ()
+LoadBlock       :def ()
+
+# stack load/store instruction
+StackStore :use (Level:int, Index:int, Val:reg_t)
+StackLoad  :def (Level:int, Index:int)
+
+# invoke instruction
+InvokeMethod :def :use (ci:CALL_INFO, argc:int, argv:reg_t[])
+InvokeBlock  :def :use (ci:CALL_INFO, argc:int, argv:reg_t[])
+InvokeNative :def :use (fptr:voidPtr, argc:int, argv:reg_t[])
+
+# control flow
+Jump             (TargetBB:VALUEPtr)
+JumpIf      :use (TargetBB:VALUEPtr, Cond:reg_t)
+Throw  :def :use (Reg:reg_t)
+
+# function frame
+FramePush :use (ci:CALL_INFO, invokeblock:int, block:reg_t, argc:int, argv:reg_t[])
+FramePop       ()
+
+# # phi
+# Phi :def :use ()
+
+# trace
+Trace :use (flag:rb_event_flag_t)

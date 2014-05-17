@@ -103,7 +103,7 @@ enum vm_regan_acttype {
 #define ADD_PC(n)          (SET_PC(REG_PC + (n)))
 
 #define GET_PC_COUNT()     (REG_PC - GET_ISEQ()->iseq_encoded)
-#define JUMP(dst)          (REG_PC += (dst))
+#define JUMP(dst)          (SET_PC(REG_PC + (dst)))
 
 /* frame pointer, environment pointer */
 #define GET_CFP()  (COLLECT_USAGE_REGISTER_HELPER(CFP, GET, REG_CFP))
@@ -229,5 +229,12 @@ enum vm_regan_acttype {
 static VALUE make_no_method_exception(VALUE exc, const char *format,
 				      VALUE obj, int argc, const VALUE *argv);
 
+extern rb_serial_t *ruby_vm_global_method_state_ptr;
+extern rb_serial_t *ruby_vm_global_constant_state_ptr;
+
+VALUE vm_call_general(rb_thread_t *th, rb_control_frame_t *reg_cfp, rb_call_info_t *ci);
+void vm_search_method(rb_call_info_t *ci, VALUE recv);
+VALUE vm_call_iseq_setup_normal(rb_thread_t *th, rb_control_frame_t *cfp, rb_call_info_t *ci);
+VALUE vm_call_iseq_setup_tailcall(rb_thread_t *th, rb_control_frame_t *cfp, rb_call_info_t *ci);
 
 #endif /* RUBY_INSNHELPER_H */

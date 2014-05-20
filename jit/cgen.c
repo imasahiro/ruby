@@ -9,6 +9,16 @@
  **********************************************************************/
 
 #include <sys/time.h> // gettimeofday
+
+#if defined __APPLE__
+#include <mach-o/dyld.h> // _dyld_get_image_name
+#elif defined __linux__
+#include <unistd.h>      // readlink
+#endif
+
+#include <sys/stat.h>
+
+#include <limits.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -17,6 +27,8 @@
 #include <assert.h>
 #define GWJIT_HOST 1
 #include "jit_context.h"
+
+#include "verconf.h"
 
 static gwjit_context_t jit_host_context = {};
 
@@ -136,6 +148,15 @@ static int buffer_printf(Buffer *buf, const char *fmt, va_list ap)
   }
 }
 
+static uint64_t getTimeMilliSecond(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+}
+
+static uint64_t timer = 0;
+
 // cgen
 enum cgen_mode {
   PROCESS_MODE, // generate native code directly
@@ -151,20 +172,93 @@ typedef struct CGen {
 } CGen;
 
 static const char cmd_template[] = "clang -pipe -x c "
-#if GWJIT_USE_PCH > 0
-"-include-pch build/ruby_jit.h.pch "
-#endif
+"%s %s "
 "-Ijit/ -Ibuild/ -Ibuild/.ext/include/x86_64-darwin13 -Iinclude -I. "
 "-dynamiclib -O3 -g0 -Wall -o %s %s";
 
-static uint64_t getTimeMilliSecond(void)
+static size_t find_parent_path_end(char *buf, size_t path_len)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+  size_t end = path_len;
+  while(end > 0 && buf[end - 1] != '/') {
+    end--;
+  }
+  return end;
+
 }
 
-static uint64_t timer = 0;
+static void remove_filename(char *buf)
+{
+  size_t pos = find_parent_path_end(buf, strlen(buf));
+  if (buf > 0) {
+    buf[pos] = '\0';
+  }
+}
+
+static int append_path(char *buf, size_t bufsize, const char *path, size_t psize)
+{
+  size_t len = strlen(buf);
+  if (len + psize >= bufsize) {
+    return 0;
+  }
+  strncpy(buf + len, path, psize);
+  buf[len + psize] = '\0';
+  return 1;
+}
+
+static int file_exists(const char *path)
+{
+  int res = 0;
+#if defined _WIN32
+  DWORD attr = GetFileAttributesA(path);
+  res = (attr != -1);
+#elif defined __linux__ || defined __APPLE__
+  struct stat buf;
+  res = (stat(path, &buf) != -1);
+#endif
+  return res;
+}
+
+static int get_current_executable_path(char *buf, size_t bufsize)
+{
+#ifdef __APPLE__
+  const char *path = _dyld_get_image_name(0);
+  if (realpath(path, buf) != NULL) {
+    return 1;
+  }
+#elif defined __linux__
+  if (readlink("/proc/self/exe", buf, bufsiz) != -1) {
+    return 1;
+  }
+#else
+#error not supported
+#endif
+  return 0;
+}
+
+#define PCH_FILE_NAME   "ruby_jit.h.pch"
+
+static int construct_pch_path(char *buf, size_t bufsize)
+{
+  if (get_current_executable_path(buf, bufsize)) {
+    remove_filename(buf);
+    if (append_path(buf, bufsize, PCH_FILE_NAME, strlen(PCH_FILE_NAME))) {
+      if (file_exists(buf)) {
+        return 1;
+      }
+    }
+  }
+#if defined RUBY_LIB_PREFIX
+  buf[0] = '\0';
+  if (append_path(buf, bufsize, RUBY_LIB_PREFIX, strlen(RUBY_LIB_PREFIX))) {
+    if (append_path(buf, bufsize, PCH_FILE_NAME, strlen(PCH_FILE_NAME))) {
+      if (file_exists(buf)) {
+        return 1;
+      }
+    }
+  }
+#endif /* defined RUBY_LIB_PREFIX */
+  return 0;
+}
 
 static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
 {
@@ -174,8 +268,21 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
   gen->hdr  = NULL;
   timer = getTimeMilliSecond();
   if (gen->mode == PROCESS_MODE) {
-    char cmd[512] = {};
-    snprintf(cmd, 512, cmd_template, path, "-");
+    char cmd[PATH_MAX + 512] = {};
+    const char *pch_path = "";
+    const char *pch_flag = "";
+#if GWJIT_USE_PCH > 0
+    char buf[PATH_MAX];
+    if (construct_pch_path(buf, PATH_MAX)) {
+      pch_path = (const char *) buf;
+      pch_flag = "-include-pch";
+    }
+    else
+#endif
+    {
+      fprintf(stderr, "gwjit cannot use pre compiled header\n");
+    }
+    snprintf(cmd, 512, cmd_template, pch_flag, pch_path, path, "-");
     gen->fp = popen(cmd, "w");
   }
   else {
@@ -200,9 +307,27 @@ static void cgen_freeze(CGen *gen, int id)
 
   if (gen->mode == FILE_MODE) {
     char fpath[512] = {};
-    char cmd[512]   = {};
+    char cmd[PATH_MAX + 512] = {};
+    const char *pch_path = "";
+    const char *pch_flag = "";
+#if GWJIT_USE_PCH > 0
+    char buf[PATH_MAX];
+    if (construct_pch_path(buf, PATH_MAX)) {
+      pch_path = (const char *) buf;
+      pch_flag = "-include-pch";
+    }
+    else
+#endif
+    {
+      fprintf(stderr, "gwjit cannot use pre compiled header\n");
+    }
+
     snprintf(fpath, 512, "/tmp/gwjit.%d.%d.c", getpid(), id);
-    snprintf(cmd, 512, cmd_template, gen->path, fpath);
+    snprintf(cmd, 512, cmd_template, pch_flag, pch_path, gen->path, fpath);
+
+#if GWJIT_DUMP_COMPILE_LOG > 1
+    fprintf(stderr, "compiling c code : %s\n", cmd);
+#endif
 #if GWJIT_DUMP_COMPILE_LOG > 0
     fprintf(stderr, "generated c-code is %s\n", gen->path);
 #endif

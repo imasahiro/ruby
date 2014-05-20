@@ -24,6 +24,8 @@
 #include "jit.h"
 #include "jit_opts.h"
 
+#include "jit_prelude.c"
+
 typedef long reg_t;
 #include "kmap.c"
 
@@ -211,6 +213,7 @@ void jit_init()
 {
   disable_trace(NULL, NULL, TRACE_OK);
   init_compiler();
+  Init_jit();
 }
 
 void jit_disable()

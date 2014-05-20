@@ -853,9 +853,13 @@ gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb
 	$(ECHO) creating $@
 	$(Q) $(BASERUBY) "$(srcdir)/jit/gwir.rb" $(srcdir)/jit/gwir.def > $@
 
+jit_prelude.c: $(srcdir)/tool/compile_prelude.rb $(srcdir)/jit/jit_prelude.rb
+	$(ECHO) generating $@
+	$(Q) $(COMPILE_PRELUDE) $(srcdir)/jit/jit_prelude.rb $@
+
 jit.$(OBJEXT): {$(VPATH)}jit/jit.c {$(VPATH)}jit/kmap.c {$(VPATH)}jit/jit_opts.h \
 	{$(VPATH)}jit/ir.c {$(VPATH)}jit/record.c  {$(VPATH)}jit/snapshot.c \
-	{$(VPATH)}jit/cgen.c {$(VPATH)}gwir.c
+	{$(VPATH)}jit/cgen.c {$(VPATH)}gwir.c {$(VPATH)}jit_prelude.c
 	@$(ECHO) compiling $<
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c $<
 

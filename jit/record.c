@@ -1300,9 +1300,9 @@ static void record_opt_succ(lir_builder_t *builder, rb_control_frame_t *reg_cfp,
   if (SPECIAL_CONST_P(recv) && FIXNUM_P(recv) &&
       BASIC_OP_UNREDEFINED_P(BOP_SUCC, FIXNUM_REDEFINED_OP_FLAG)) {
     TakeStackSnapshot(builder, reg_pc);
+    Rrecv = _POP();
     EmitIR(GuardTypeFixnum, reg_pc, Rrecv);
     EmitIR(GuardMethodRedefine, reg_pc, rb_cFixnum, BOP_SUCC);
-    Rrecv = _POP();
     Robj  = EmitIR(LoadConstFixnum, INT2FIX(1));
     _PUSH(EmitIR(FixnumAddOverflow, Rrecv, Robj));
     return;
@@ -1311,6 +1311,7 @@ static void record_opt_succ(lir_builder_t *builder, rb_control_frame_t *reg_cfp,
     if (RBASIC_CLASS(recv) == rb_cString &&
         BASIC_OP_UNREDEFINED_P(BOP_SUCC, STRING_REDEFINED_OP_FLAG)) {
       EmitIR(GuardMethodRedefine, reg_pc, rb_cString, BOP_SUCC);
+      Rrecv = _POP();
       EmitIR(GuardTypeString, reg_pc, Rrecv);
       reg_t argv[] = {_POP()};
       _PUSH(EmitIR(InvokeNative, rb_str_succ, 1, argv));
@@ -1319,6 +1320,7 @@ static void record_opt_succ(lir_builder_t *builder, rb_control_frame_t *reg_cfp,
     else if (RBASIC_CLASS(recv) == rb_cTime &&
              BASIC_OP_UNREDEFINED_P(BOP_SUCC, TIME_REDEFINED_OP_FLAG)) {
       EmitIR(GuardMethodRedefine, reg_pc, rb_cTime, BOP_SUCC);
+      Rrecv = _POP();
       EmitIR(GuardTypeTime, reg_pc, Rrecv);
       reg_t argv[] = {_POP()};
       _PUSH(EmitIR(InvokeNative, rb_time_succ, 1, argv));

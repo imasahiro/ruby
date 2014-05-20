@@ -11,7 +11,7 @@ mkdir ${BUILD_DIR}
         ../configure --prefix=$HOME &&
             make -j8 >& /dev/null )
 
-./jit/make_pch.sh
+ruby ./jit/make_pch.rb
 ruby ./benchmark/driver.rb -v \
             --executables="ruby; built-ruby::${BUILD_DIR}/ruby" \
             --pattern='bm_' --directory=./benchmark

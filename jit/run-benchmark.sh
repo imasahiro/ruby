@@ -59,7 +59,7 @@ LIST="$LIST benchmark/bm_so_random.rb"
 #LIST="$LIST benchmark-jit/bm_vm2_newhash.rb"
 
 make -j8 -C build
-./jit/make_pch.sh
+ruby ./jit/make_pch.rb
 rm -rf bmlog-* /tmp/gwjit.*
 
 #mkdir -p benchmark-tmp
@@ -68,4 +68,6 @@ rm -rf bmlog-* /tmp/gwjit.*
 #done
 #rm -rf benchmark-tmp
 
-ruby benchmark/driver.rb --executables=original::ruby\;modified::./build/ruby
+ruby ./benchmark/driver.rb \
+            --executables="ruby; built-ruby::build/ruby" \
+            --pattern='bm_' --directory=./benchmark

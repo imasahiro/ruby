@@ -19,6 +19,7 @@
 #define rb_cHash     (jit_context->cHash  )
 #define rb_cRegexp   (jit_context->cRegexp)
 #define rb_cString   (jit_context->cString)
+#define rb_cTime     (jit_context->cTime)
 #define rb_cSymbol   (jit_context->cSymbol)
 
 #define rb_cTrueClass   (jit_context->cTrueClass  )

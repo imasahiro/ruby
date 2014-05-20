@@ -42,6 +42,7 @@ static void gwjit_context_init()
   jit_host_context.cFloat  = rb_cFloat;
   jit_host_context.cHash   = rb_cHash;
   jit_host_context.cRegexp = rb_cRegexp;
+  jit_host_context.cTime   = rb_cTime;
   jit_host_context.cString = rb_cString;
   jit_host_context.cSymbol = rb_cSymbol;
 
@@ -637,6 +638,15 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
                   "}\n", ir->R, ExitBlockId);
       break;
     }
+    case OPCODE_IGuardTypeTime : {
+      IGuardTypeTime *ir = (IGuardTypeTime *) Inst;
+      long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
+      cgen_printf(gen,
+                  "if(!(RBASIC_CLASS(v%ld) == jit_context->cTime)) {\n"
+                  "  goto L_exit%ld;\n"
+                  "}\n", ir->R, ExitBlockId);
+      break;
+    }
     case OPCODE_IGuardTypeObject : {
       IGuardTypeObject *ir = (IGuardTypeObject *) Inst;
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
@@ -1012,7 +1022,7 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
     }
     case OPCODE_IFixnumToString : {
       IFixnumToString *ir = (IFixnumToString *) Inst;
-      assert(0 && "not implemented");
+      cgen_printf(gen, "v%ld = flo_to_s(v%ld);\n", Id, ir->Val);
       break;
     }
     case OPCODE_IFloatToFixnum : {

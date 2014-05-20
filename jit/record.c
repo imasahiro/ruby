@@ -1295,7 +1295,37 @@ normal_dispatch:
 
 static void record_opt_succ(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  not_support_op(reg_cfp, reg_pc, "opt_succ");
+  VALUE recv = TOPN(0);
+  reg_t Rrecv, Robj;
+  if (SPECIAL_CONST_P(recv) && FIXNUM_P(recv) &&
+      BASIC_OP_UNREDEFINED_P(BOP_SUCC, FIXNUM_REDEFINED_OP_FLAG)) {
+    TakeStackSnapshot(builder, reg_pc);
+    EmitIR(GuardTypeFixnum, reg_pc, Rrecv);
+    EmitIR(GuardMethodRedefine, reg_pc, rb_cFixnum, BOP_SUCC);
+    Rrecv = _POP();
+    Robj  = EmitIR(LoadConstFixnum, INT2FIX(1));
+    _PUSH(EmitIR(FixnumAddOverflow, Rrecv, Robj));
+    return;
+  }
+  else {
+    if (RBASIC_CLASS(recv) == rb_cString &&
+        BASIC_OP_UNREDEFINED_P(BOP_SUCC, STRING_REDEFINED_OP_FLAG)) {
+      EmitIR(GuardMethodRedefine, reg_pc, rb_cString, BOP_SUCC);
+      EmitIR(GuardTypeString, reg_pc, Rrecv);
+      reg_t argv[] = {_POP()};
+      _PUSH(EmitIR(InvokeNative, rb_str_succ, 1, argv));
+      return;
+    }
+    else if (RBASIC_CLASS(recv) == rb_cTime &&
+             BASIC_OP_UNREDEFINED_P(BOP_SUCC, TIME_REDEFINED_OP_FLAG)) {
+      EmitIR(GuardMethodRedefine, reg_pc, rb_cTime, BOP_SUCC);
+      EmitIR(GuardTypeTime, reg_pc, Rrecv);
+      reg_t argv[] = {_POP()};
+      _PUSH(EmitIR(InvokeNative, rb_time_succ, 1, argv));
+      return;
+    }
+  }
+  not_support_op(reg_cfp, reg_pc, "opt_not");
 }
 
 static void record_opt_not(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VALUE *reg_pc)

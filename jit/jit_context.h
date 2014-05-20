@@ -18,6 +18,7 @@ typedef struct gwjit_context {
   VALUE cHash;
   VALUE cRegexp;
   VALUE cString;
+  VALUE cTime;
   VALUE cSymbol;
 
   VALUE cFalseClass;

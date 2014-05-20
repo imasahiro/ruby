@@ -118,14 +118,14 @@ static reg_t TopRegister(lir_builder_t *builder, long n)
   return Reg;
 }
 
-//static void SetRegister(lir_builder_t *builder, long n, int Reg)
-//{
-//  assert(builder->RegStackSize > n && n >= 0);
-//#if DUMP_STACK_MAP > 1
-//  fprintf(stderr, "set : %ld %d\n", builder->RegStackSize - n - 1, Reg);
-//#endif
-//  builder->RegStack[builder->RegStackSize - n] = Reg;
-//}
+static void SetRegister(lir_builder_t *builder, long n, reg_t Reg)
+{
+  assert(builder->RegStackSize > n && n >= 0);
+#if DUMP_STACK_MAP > 1
+  fprintf(stderr, "set : %ld %ld\n", builder->RegStackSize - n - 1, Reg);
+#endif
+  builder->RegStack[builder->RegStackSize - n - 1] = Reg;
+}
 
 // call stack
 static void PopCallStack(lir_builder_t *builder)

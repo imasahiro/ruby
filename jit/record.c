@@ -75,6 +75,7 @@ check_cfunc(const rb_method_entry_t *me, VALUE (*func)())
 #define _POP()       PopRegister(builder)
 #define _PUSH(REG)   PushRegister(builder, REG)
 #define _TOPN(N)     TopRegister(builder, (N))
+#define _SET(N, REG) SetRegister(builder, (N), REG)
 
 static reg_t EmitConverter(lir_builder_t *builder, VALUE val, reg_t Rval, VALUE *reg_pc, int type) {
   if (FIXNUM_P(val)) {
@@ -574,12 +575,10 @@ static void record_topn(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VAL
 
 static void record_setn(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  not_support_op(reg_cfp, reg_pc, "setn");
-  //rb_num_t n = (rb_num_t)GET_OPERAND(1);
-  //asm volatile("int3"); // need test
-  //reg_t Rval = _POP();
-  //_SET(n - 1, Rval);
-  //_PUSH(Rval);
+  rb_num_t n = (rb_num_t)GET_OPERAND(1);
+  reg_t Rval = _POP();
+  _SET(n, Rval);
+  _PUSH(Rval);
 }
 
 static void record_adjuststack(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VALUE *reg_pc)

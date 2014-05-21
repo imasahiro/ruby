@@ -22,6 +22,7 @@ typedef BasicBlock *BasicBlockPtr;
 #define FMT_voidPtr  "%p"
 #define FMT_CALL_INFO "%p"
 #define FMT_IC        "%p"
+#define FMT_ISEQ      "%p"
 #define FMT_BasicBlockPtr FMT_reg_t
 #define FMT_rb_event_flag_t "%lu"
 
@@ -34,6 +35,7 @@ typedef BasicBlock *BasicBlockPtr;
 #define DATA_voidPtr(V)       (V)
 #define DATA_CALL_INFO(V)     (V)
 #define DATA_IC(V)            (V)
+#define DATA_ISEQ(V)          (V)
 #define DATA_BasicBlockPtr(V) (lir_getid(&(V)->base))
 #define DATA_rb_event_flag_t(V) (V)
 

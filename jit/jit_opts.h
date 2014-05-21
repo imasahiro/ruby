@@ -19,7 +19,7 @@
 #define DUMP_STACK_MAP 0 /* 0:disable, 1:dump, 2:verbose */
 //#define DUMP_LLVM_IR   0 /* 0:disable, 1:dump, 2:dump non-optimized llvm ir */
 #define DUMP_INST      0 /* 0:disable, 1:dump */
-#define DUMP_LIR       0 /* 0:disable, 1:dump */
+#define DUMP_LIR       1 /* 0:disable, 1:dump */
 #define DUMP_CALL_STACK_MAP 0 /* 0:disable, 1:dump */
 
 #define GWJIT_DUMP_COMPILE_LOG 2 /* 0:disable, 1:dump, 2:verbose */

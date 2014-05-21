@@ -49,7 +49,7 @@ vm_load_cache(VALUE obj, ID id, IC ic, rb_call_info_t *ci, int is_attr)
   return 0;
 }
 
-static inline int
+static int
 check_cfunc(const rb_method_entry_t *me, VALUE (*func)())
 {
   if (me && me->def->type == VM_METHOD_TYPE_CFUNC &&
@@ -161,10 +161,17 @@ static void EmitMethodCall(lir_builder_t *builder, rb_control_frame_t *reg_cfp, 
   // check Math method
   if (ci->me && ci->me->def->type == VM_METHOD_TYPE_CFUNC) {
     VALUE cMath = rb_singleton_class(rb_mMath);
-    if (cMath == ci->me->klass) {
+    if (ci->me->klass == cMath) {
       goto emit_math_api;
     }
   }
+
+  // check ClassA.new(argc, argv)
+  //if (check_cfunc(ci->me,  rb_class_new_instance)) {
+  //  if (ci->me->klass == rb_cClass) {
+  //    fprintf(stderr, "new\n");
+  //  }
+  //}
 
   // I think this method is c-defined method.
   // abort trace compilation
@@ -178,7 +185,7 @@ emit_push_frame:
   }
   EmitIR(GuardMethodCache, reg_pc, argv[0], ci);
   if (Rblock) {
-    EmitIR(GuardObjectEqual, reg_pc, Rblock, (VALUE) block);
+    EmitIR(GuardBlockEqual, reg_pc, Rblock, (VALUE) block);
   }
   PushCallStack(builder, argc, argv);
   _PUSH(EmitIR(FramePush, ci, 0, Rblock, argc, argv));
@@ -623,7 +630,7 @@ static void record_send(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VAL
     return;
   }
   else if (ci->blockiseq != 0) {
-    Rblock = EmitIR(LoadSelfAsBlock);
+    Rblock = EmitIR(LoadSelfAsBlock, ci->blockiseq);
     block  = RUBY_VM_GET_BLOCK_PTR_IN_CFP(reg_cfp);
   }
 
@@ -667,14 +674,16 @@ static void record_invokeblock(lir_builder_t *builder, rb_control_frame_t *reg_c
   reg_t Rblock, argv[argc];
   TakeStackSnapshot(builder, reg_pc);
 
+  const rb_block_t *block = rb_vm_control_frame_block_ptr(reg_cfp);
   argv[0] = EmitIR(LoadSelf);
-  Rblock  = EmitIR(LoadBlock);
+  Rblock  = EmitIR(LoadBlock, block->iseq);
 
   ci->argc = ci->orig_argc;
   ci->blockptr = 0;
   ci->recv = GET_SELF();
 
-  const rb_block_t *block = rb_vm_control_frame_block_ptr(reg_cfp);
+  //fprintf(stderr, "cfp=%p, block=%p\n", reg_cfp, block);
+  //asm volatile("int3");
   VALUE type = GET_ISEQ()->local_iseq->type;
 
   if ((type != ISEQ_TYPE_METHOD && type != ISEQ_TYPE_CLASS) || block == 0) {
@@ -704,7 +713,7 @@ static void record_invokeblock(lir_builder_t *builder, rb_control_frame_t *reg_c
   // This code is needed for adjusting register stack.
   _PUSH(argv[0]);
 
-  EmitIR(GuardObjectEqual, reg_pc, Rblock, (VALUE) block);
+  EmitIR(GuardBlockEqual, reg_pc, Rblock, (VALUE) block);
   PushCallStack(builder, argc, argv);
   _PUSH(EmitIR(FramePush, ci, 1, Rblock, argc, argv));
 }

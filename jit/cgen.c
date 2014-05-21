@@ -411,17 +411,19 @@ static void generate_fixnum_cond(CGen *gen, const char *op, long Id, reg_t LHS, 
 
 static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs, lir_compile_data_header_t *Inst);
 
-static void PrepareSideExit(lir_builder_t *builder, hashmap_t *SideExitBBs)
+static void PrepareSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs)
 {
   long j = 1;
   hashmap_iterator_t itr = {0, 0};
   while(hashmap_next(&builder->Current->SideExit, &itr)) {
     VALUE *pc = itr.entry->k;
     hashmap_set(SideExitBBs, pc, (struct Trace *)(j << 1));
+    cgen_printf(gen, "VALUE *exit_pc_%ld = (VALUE *) %p;\n", j, pc);
     j += 1;
   }
 }
 
+static void EmitFramePush(lir_builder_t *builder, CGen *cgen, IFramePush *ir);
 
 static void EmitSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs)
 {
@@ -440,12 +442,15 @@ static void EmitSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitB
     cgen_printf(gen, "//fprintf(stderr,\"exit%ld : pc=%p\\n\");\n", BlockId, pc);
 
     j = 0;
+    cgen_printf(gen, "th->cfp = reg_cfp = original_cfp;\n");
     cgen_printf(gen, "SET_SP(original_sp);\n");
     for (i = 0; i < stack->size; i++) {
-      lir_compile_data_header_t *ir = FindLIRById(builder, stack->regs[i]);
-      if (ir->opcode == OPCODE_IFramePush) {
-        cgen_printf(gen, "SET_SP(GET_SP() + %d);\n", j);
-        TranslateLIR2C(builder, gen, NULL, ir);
+      lir_compile_data_header_t *Inst = FindLIRById(builder, stack->regs[i]);
+      if (Inst->opcode == OPCODE_IFramePush) {
+        IFramePush *ir = (IFramePush *) Inst;
+        int offset = j - (ir->invokeblock ? 1 : 0);
+        cgen_printf(gen, "SET_SP(GET_SP() + %d);\n", offset);
+        EmitFramePush(builder, gen, ir);
         j = 0;
       }
       else {
@@ -456,9 +461,47 @@ static void EmitSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitB
 
     cgen_printf(gen,
                 "SET_SP(GET_SP() + %d);\n"
-                "return (VALUE *) 0x%lx;\n",
-                (int) stack->size, (long) pc);
+                "SET_PC(exit_pc_%ld);\n"
+                "return exit_pc_%ld;\n",
+                j, BlockId, BlockId);
   }
+}
+
+static void EmitFramePush(lir_builder_t *builder, CGen *gen, IFramePush *ir)
+{
+  int i, begin = ir->invokeblock ? 1 : 0;
+  cgen_printf(gen,
+              "{\n"
+              "  CALL_INFO ci = (CALL_INFO) %p;\n", ir->ci);
+  for (i = begin; i < ir->argc; i++) {
+    cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n", i - begin, ir->argv[i]);
+  }
+  cgen_printf(gen, "  SET_SP(GET_SP() + %d);\n", ir->argc - ir->invokeblock);
+  if (ir->invokeblock) {
+    cgen_printf(gen,
+                "  ci->argc = ci->orig_argc;\n"
+                "  ci->blockptr = 0;\n"
+                "  ci->recv = v%ld;\n"
+                "  jit_vm_call_block_setup(th, reg_cfp,\n"
+                "                          (rb_block_t *) v%ld, ci, %d);\n"
+                "  reg_cfp = th->cfp;\n",
+                ir->argv[0], ir->block, ir->argc - 1);
+  }
+  else {
+    if (ir->block != 0) {
+      cgen_printf(gen,
+                  "  ci->blockptr = (rb_block_t *) v%ld;\n"
+                  "  assert(ci->blockptr != 0);\n"
+                  "  ci->blockptr->iseq = ci->blockiseq;\n"
+                  "  ci->blockptr->proc = 0;\n",
+                  ir->block);
+    }
+    cgen_printf(gen,
+                "  jit_vm_call_iseq_setup_normal(th, reg_cfp, ci, %d);\n"
+                "  reg_cfp = th->cfp;\n",
+                ir->argc - 1);
+  }
+  cgen_printf(gen, "}\n");
 }
 
 static void Translate(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs, int fid)
@@ -487,7 +530,8 @@ static void Translate(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs,
               "                rb_control_frame_t *reg_cfp,\n"
               "                VALUE *reg_pc)\n"
               "{\n"
-              "  VALUE *original_sp = GET_SP();\n",
+              "  VALUE *original_sp = GET_SP();\n"
+              "  rb_control_frame_t *original_cfp = reg_cfp;\n",
 #if GWJIT_DUMP_COMPILE_LOG > 0
               RSTRING_PTR(file),
               rb_iseq_line_no(iseq,
@@ -495,7 +539,7 @@ static void Translate(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs,
 #endif
               fid, fid);
 
-  PrepareSideExit(builder, SideExitBBs);
+  PrepareSideExit(builder, gen, SideExitBBs);
   cgen_printf(gen, "VALUE v0 = 0; (void) v0;\n");
 
   while(block != NULL) {
@@ -505,7 +549,7 @@ static void Translate(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs,
       if (lir_inst_define_value(Inst->opcode)) {
         long Id = lir_getid(Inst);
         assert(Id != 0);
-        cgen_printf(gen, "VALUE v%ld;\n", Id);
+        cgen_printf(gen, "VALUE v%ld = 0;\n", Id);
       }
     }
     block = (BasicBlock *) block->base.next;
@@ -598,8 +642,9 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
       cgen_printf(gen,
                   "if(!!SPECIAL_CONST_P(v%ld)) {\n"
+                  "fprintf(stderr,\"v%ld\\n\");\n"
                   "  goto L_exit%ld;\n"
-                  "}\n", ir->R, ExitBlockId);
+                  "}\n", ir->R, Id, ExitBlockId);
       break;
     }
     case OPCODE_IGuardTypeArray : {
@@ -674,13 +719,18 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
                   "}\n", ir->R, ExitBlockId);
       break;
     }
-    case OPCODE_IGuardObjectEqual : {
-      IGuardObjectEqual *ir = (IGuardObjectEqual *) Inst;
+    case OPCODE_IGuardBlockEqual : {
+      IGuardBlockEqual *ir = (IGuardBlockEqual *) Inst;
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
+      rb_block_t *block = (rb_block_t *) ir->Block;
       cgen_printf(gen,
-                  "if(!(v%ld == (VALUE) 0x%lx)) {\n"
-                  "  goto L_exit%ld;\n"
-                  "}\n", ir->R, ir->Obj, ExitBlockId);
+                  "{\n"
+                  "  rb_block_t *block = (rb_block_t *) v%ld;\n"
+                  "  const rb_iseq_t *iseq = (const rb_iseq_t *) %p;\n"
+                  "  if(!(block->iseq == iseq)) {\n"
+                  "    goto L_exit%ld;\n"
+                  "  }\n"
+                  "}\n", ir->R, block->iseq, ExitBlockId);
       break;
     }
     case OPCODE_IGuardProperty : {
@@ -706,12 +756,12 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
       IGuardMethodCache *ir = (IGuardMethodCache *) Inst;
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
       cgen_printf(gen,
-                  "{ CALL_INFO ci = (CALL_INFO) 0x%lx;\n"
+                  "{ CALL_INFO ci = (CALL_INFO) %p;\n"
                   "  if (!(GET_GLOBAL_METHOD_STATE()     == ci->method_state &&\n"
                   "        RCLASS_SERIAL(CLASS_OF(v%ld)) == ci->class_serial)) {\n"
                   "    goto L_exit%ld;\n"
                   "  }\n"
-                  "}\n", (long) ir->ci, ir->R, ExitBlockId);
+                  "}\n", ir->ci, ir->R, ExitBlockId);
       break;
     }
     case OPCODE_IGuardMethodRedefine : {
@@ -1259,12 +1309,24 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
       break;
     }
     case OPCODE_ILoadSelfAsBlock : {
-      cgen_printf(gen, "v%ld = (VALUE) RUBY_VM_GET_BLOCK_PTR_IN_CFP(reg_cfp);\n",
-                  Id);
+      ILoadSelfAsBlock *ir = (ILoadSelfAsBlock *) Inst;
+      cgen_printf(gen,
+                  "{\n"
+                  "  ISEQ blockiseq = (ISEQ) %p;\n"
+                  "  v%ld = (VALUE) RUBY_VM_GET_BLOCK_PTR_IN_CFP(reg_cfp);\n"
+                  "  assert(((rb_block_t *)v%ld)->iseq == NULL);\n"
+                  "  ((rb_block_t *)v%ld)->iseq = blockiseq;\n"
+                  "}\n",
+                  ir->iseq, Id, Id, Id);
       break;
     }
     case OPCODE_ILoadBlock : {
-      cgen_printf(gen, "v%ld = (VALUE) VM_CF_BLOCK_PTR(reg_cfp);\n", Id);
+      ILoadBlock *ir = (ILoadBlock *) Inst;
+      cgen_printf(gen,
+                  "{\n"
+                  "  v%ld = (VALUE) VM_CF_BLOCK_PTR(reg_cfp);\n"
+                  "}\n",
+                  Id);
       break;
     }
     case OPCODE_ILoadConstNil : {
@@ -1382,39 +1444,7 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
     }
     case OPCODE_IFramePush : {
       IFramePush *ir = (IFramePush *) Inst;
-      int i, begin = ir->invokeblock ? 1 : 0;
-      cgen_printf(gen,
-                  "{\n"
-                  "  CALL_INFO ci = (CALL_INFO) %p;\n", ir->ci);
-      for (i = begin; i < ir->argc; i++) {
-        cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n", i - begin, ir->argv[i]);
-      }
-      cgen_printf(gen, "  SET_SP(GET_SP() + %d);\n", ir->argc - ir->invokeblock);
-      if (ir->invokeblock) {
-        cgen_printf(gen,
-                    "  ci->argc = ci->orig_argc;\n"
-                    "  ci->blockptr = 0;\n"
-                    "  ci->recv = v%ld;\n"
-                    "  jit_vm_call_block_setup(th, reg_cfp,\n"
-                    "                          (rb_block_t *) v%ld, ci, %d);\n"
-                    "  reg_cfp = th->cfp;\n",
-                    ir->argv[0], ir->block, ir->argc - 1);
-      }
-      else {
-        if (ir->block != 0) {
-          cgen_printf(gen,
-                      "  ci->blockptr = (rb_block_t *) v%ld;\n"
-                      "  assert(ci->blockptr != 0);\n"
-                      "  ci->blockptr->iseq = ci->blockiseq;\n"
-                      "  ci->blockptr->proc = 0;\n",
-                      ir->block);
-        }
-        cgen_printf(gen,
-                    "  jit_vm_call_iseq_setup_normal(th, reg_cfp, ci, %d);\n"
-                    "  reg_cfp = th->cfp;\n",
-                    ir->argc - 1);
-      }
-      cgen_printf(gen, "}\n");
+      EmitFramePush(builder, gen, ir);
       break;
     }
     case OPCODE_IFramePop : {

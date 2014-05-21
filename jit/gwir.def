@@ -11,7 +11,7 @@ GuardTypeTime         :use (Exit:VALUEPtr, R:reg_t)
 GuardTypeObject       :use (Exit:VALUEPtr, R:reg_t)
 GuardTypeNil          :use (Exit:VALUEPtr, R:reg_t)
 GuardTypeNonNil       :use (Exit:VALUEPtr, R:reg_t)
-GuardObjectEqual      :use (Exit:VALUEPtr, R:reg_t, Obj:VALUE)
+GuardBlockEqual       :use (Exit:VALUEPtr, R:reg_t, Block:VALUE)
 GuardProperty         :use (Exit:VALUEPtr, R:reg_t, is_attr:int, cache:voidPtr)
 GuardMethodCache      :use (Exit:VALUEPtr, R:reg_t, ci:CALL_INFO)
 GuardMethodRedefine        (Exit:VALUEPtr, klass:VALUE, bop:int)
@@ -114,8 +114,8 @@ LoadConstString  :def (Val:VALUE)
 
 # load special object instruction
 LoadSelf        :def ()
-LoadSelfAsBlock :def ()
-LoadBlock       :def ()
+LoadSelfAsBlock :def (iseq:ISEQ)
+LoadBlock       :def (iseq:ISEQ)
 
 # stack load/store instruction
 StackStore :use (Level:int, Index:int, Val:reg_t)

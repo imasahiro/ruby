@@ -555,7 +555,15 @@ static void record_dup(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VALU
 
 static void record_dupn(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  not_support_op(reg_cfp, reg_pc, "dupn");
+  rb_num_t i, n = (rb_num_t)GET_OPERAND(1);
+  reg_t argv[n];
+  // FIXME optimize
+  for (i = 0; i < n; i++) {
+    argv[i] = _TOPN(n - i - 1);
+  }
+  for (i = 0; i < n; i++) {
+      _PUSH(argv[i]);
+  }
 }
 
 static void record_swap(lir_builder_t *builder, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
@@ -1055,7 +1063,6 @@ static void record_opt_aref(lir_builder_t *builder, rb_control_frame_t *reg_cfp,
 
   if (!SPECIAL_CONST_P(recv)) {
     EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    EmitIR(GuardTypeSpecialConst, reg_pc, Robj );
     VALUE recv_klass = RBASIC_CLASS(recv);
     if(recv_klass == rb_cArray && FIXNUM_P(obj) &&
        BASIC_OP_UNREDEFINED_P(BOP_AREF, ARRAY_REDEFINED_OP_FLAG)) {
@@ -1063,7 +1070,6 @@ static void record_opt_aref(lir_builder_t *builder, rb_control_frame_t *reg_cfp,
       EmitIR(GuardTypeFixnum, reg_pc, Robj);
       EmitIR(GuardMethodRedefine, reg_pc, rb_cArray, BOP_AREF);
       Rval = EmitIR(ArrayGet, Rrecv, Robj);
-      Rval = EmitIR(InvokeNative, rb_ary_entry, 2, params);
     }
     else if(recv_klass == rb_cHash &&
             BASIC_OP_UNREDEFINED_P(BOP_AREF, ARRAY_REDEFINED_OP_FLAG)) {

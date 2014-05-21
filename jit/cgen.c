@@ -642,9 +642,8 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
       cgen_printf(gen,
                   "if(!!SPECIAL_CONST_P(v%ld)) {\n"
-                  "fprintf(stderr,\"v%ld\\n\");\n"
                   "  goto L_exit%ld;\n"
-                  "}\n", ir->R, Id, ExitBlockId);
+                  "}\n", ir->R, ExitBlockId);
       break;
     }
     case OPCODE_IGuardTypeArray : {

@@ -167,11 +167,17 @@ static void EmitMethodCall(lir_builder_t *builder, rb_control_frame_t *reg_cfp, 
   }
 
   // check ClassA.new(argc, argv)
-  //if (check_cfunc(ci->me,  rb_class_new_instance)) {
-  //  if (ci->me->klass == rb_cClass) {
-  //    fprintf(stderr, "new\n");
-  //  }
-  //}
+  if (check_cfunc(ci->me,  rb_class_new_instance)) {
+    if (ci->me->klass == rb_cClass) {
+      //fprintf(stderr, "new\n");
+    }
+  }
+
+  // check block_given?
+  extern VALUE rb_f_block_given_p(void);
+  if (check_cfunc(ci->me,  rb_f_block_given_p)) {
+    goto emit_block_given;
+  }
 
   // I think this method is c-defined method.
   // abort trace compilation
@@ -256,6 +262,14 @@ emit_math_api:
   fprintf(stderr, "unsupported math api\n");
   disable_trace(reg_cfp, reg_pc, TRACE_ERROR_NATIVE_METHOD);
   return;
+
+emit_block_given:
+  Rrecv = EmitIR(LoadSelf);
+  EmitIR(GuardMethodCache, reg_pc, Rrecv, ci);
+  EmitIR(InvokeNative, rb_f_block_given_p, 0, argv);
+  return;
+
+
 }
 
 static void _record_getlocal(lir_builder_t *builder, rb_num_t level, lindex_t idx)

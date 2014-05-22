@@ -1203,7 +1203,6 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
     }
     case OPCODE_IHashSet : {
       IHashSet *ir = (IHashSet *) Inst;
-      assert(0 && "not implemented");
       cgen_printf(gen,
                   "  rb_hash_aset(v%ld, v%ld, v%ld);\n"
                   "  v%ld = v%ld;\n",

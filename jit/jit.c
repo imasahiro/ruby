@@ -52,13 +52,6 @@ struct compiler_info {
   struct Trace *Parent;
   hashmap_t Traces;
   lir_builder_t *_LirBuilder;
-  void *private_data[4];
-};
-
-enum UnboxedType {
-  FixnumType,
-  FlonumType,
-  NotSpecialConst
 };
 
 typedef struct lir_compile_data_header {
@@ -74,7 +67,6 @@ typedef struct lir_basic_block {
   unsigned size;
   unsigned capacity;
   VALUE *start_pc;
-  void *private_data[1];
 } BasicBlock;
 
 struct call_stack_struct {
@@ -101,7 +93,6 @@ struct lir_builder {
   //int   stack_top;
   int   stack_bottom;
   int   CallDepth;
-  void *private_data[8];
 };
 
 enum trace_state {
@@ -194,18 +185,6 @@ static void delete_compiler()
   hashmap_dispose(&compiler_info->Traces, delete_trace);
   free(compiler_info);
 }
-
-#ifdef USE_LLVM
-static void *GetPrivateData(int index)
-{
-  return compiler_info->private_data[index];
-}
-
-static void SetPrivateData(int index, void *data)
-{
-  compiler_info->private_data[index] = data;
-}
-#endif
 
 static void finalize_codegen();
 

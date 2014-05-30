@@ -11,6 +11,11 @@
 #ifndef GWJIT_CONTEXT_H
 #define GWJIT_CONTEXT_H
 
+typedef enum trace_exit_staus {
+  TRACE_EXIT_SUCCESS = 0,
+  TRACE_EXIT_SIDE_EXIT
+} TraceExitStatus;
+
 typedef struct gwjit_context {
   VALUE cArray;
   VALUE cFixnum;

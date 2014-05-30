@@ -1814,8 +1814,7 @@ ruby_vm_destruct(rb_vm_t *vm)
 	    rb_objspace_free(objspace);
 	}
 #endif
-        void jit_disable();
-        jit_disable();
+	RJitGlobalDestruct();
 	/* after freeing objspace, you *can't* use ruby_xfree() */
 	ruby_mimfree(vm);
 	ruby_current_vm = 0;
@@ -2750,7 +2749,7 @@ Init_VM(void)
     vm_init_redefined_flag();
 
     /* JIT bootstrap */
-    jit_init();
+    RJitGlobalInit();
 
     /* vm_backtrace.c */
     Init_vm_backtrace();

@@ -8,170 +8,167 @@
 
  **********************************************************************/
 
-typedef struct Stackmap {
-  size_t size;
-  reg_t regs[0];
-} StackMap;
-
-static StackMap *GetStackMap(lir_builder_t *builder, VALUE *pc)
+static StackMap *GetStackMap(TraceRecorder *Rec, VALUE *pc)
 {
-  return (StackMap *) hashmap_get(&builder->Current->SideExit, pc);
+  return (StackMap *) hashmap_get(&TraceRecorderGetTrace(Rec)->SideExit, pc);
 }
 
-static void AddStackMap(lir_builder_t *builder, VALUE *pc, StackMap *map)
+static void AddStackMap(TraceRecorder *Rec, VALUE *pc, StackMap *map)
 {
-#if 0
-  StackMap *old = GetStackMap(builder, pc);
-  assert(old == NULL);
-#endif
-  hashmap_set(&builder->Current->SideExit, pc, (struct Trace *) map);
+  hashmap_set(&TraceRecorderGetTrace(Rec)->SideExit, pc, (struct Trace *) map);
 }
 
-static void DeleteStackMap(void *map)
-{
-  free(map);
-}
-
-static void TakeStackSnapshot(lir_builder_t *builder, VALUE *PC)
+static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
 {
 #if DUMP_STACK_MAP > 0
   fprintf(stderr, "\t\ts:pc=%p:top=%d bottom=%d, %d\n",
           PC,
-          0/*builder->stack_top*/, builder->stack_bottom,
-          builder->RegStackSize
+          0/*Rec->stack_top*/, Rec->StackBottom,
+          Rec->RegStackSize
          );
 #endif
-  int begin = builder->stack_bottom;
-  int end   = builder->RegStackSize;
-  //int end   = builder->stack_top < builder->RegStackSize
-  //    ? builder->stack_top : builder->RegStackSize;
+  int begin = Rec->StackBottom;
+  int end   = Rec->RegStackSize;
   int i, n = end - begin;
-  StackMap *map = (StackMap *) malloc(sizeof(StackMap) + sizeof(reg_t) * n);
+  StackMap *map;
+  if ((map = GetStackMap(Rec, PC))) {
+    DeleteStackMap(map);
+  }
+
+  map = (StackMap *) malloc(sizeof(StackMap) + sizeof(reg_t) * n);
   map->size = n;
+  map->flag = TRACE_EXIT_SIDE_EXIT;
+  if (RJitModeIs(Rec->jit, TRACE_MODE_EMIT_BACKWARD_BRANCH)) {
+    map->flag = TRACE_EXIT_SUCCESS;
+  }
   for (i = 0; i < n; i++) {
-    reg_t reg = builder->RegStack[i];
+    reg_t reg = Rec->RegStack[i];
 #if DUMP_STACK_MAP > 0
     fprintf(stderr, "\t\t[%d] reg=%ld\n", i, reg);
 #endif
     map->regs[i] = reg;
   }
-  AddStackMap(builder, PC, map);
+  AddStackMap(Rec, PC, map);
 }
 
-static void record_stack_bottom(lir_builder_t *builder, int opcode, VALUE *pc)
+static void record_stack_bottom(TraceRecorder *Rec, int opcode, VALUE *pc)
 {
   //FIXME
   // typeof concatstrings's operand is rb_num_t not Fixnum.
   // but insn_stack_increase() assume typeof the operand is Fixnum
 #if 0
   int depth = insn_stack_increase(0, opcode, pc + 1);
-  builder->stack_top += depth;
-  if (builder->stack_top < builder->stack_bottom) {
-    builder->stack_bottom = builder->stack_top;
+  Rec->stack_top += depth;
+  if (Rec->stack_top < Rec->StackBottom) {
+    Rec->StackBottom = Rec->stack_top;
   }
 #if DUMP_STACK_MAP > 1
   fprintf(stderr, "\t\tr:top=%d bottom=%d, %d\n",
-          builder->stack_top, builder->stack_bottom,
-          builder->RegStackSize
+          Rec->stack_top, Rec->StackBottom,
+          Rec->RegStackSize
          );
 #endif
 #endif
 }
 
-static reg_t PopRegister(lir_builder_t *builder)
+static void PushRegister(TraceRecorder *Rec, reg_t Reg)
+{
+  if (Rec->RegStackSize == Rec->RegStackCapacity) {
+    unsigned newsize = Rec->RegStackCapacity * 2;
+    Rec->RegStack =
+        (reg_t *) lir_realloc(Rec, Rec->RegStack,
+                              sizeof(reg_t) * Rec->RegStackCapacity,
+                              sizeof(reg_t) * newsize);
+    Rec->RegStackCapacity = newsize;
+  }
+  assert(Reg >= 0);
+  Rec->RegStack[Rec->RegStackSize] = Reg;
+  Rec->RegStackSize += 1;
+#if DUMP_STACK_MAP > 1
+  fprintf(stderr, "push: %d %ld\n", Rec->RegStackSize, Reg);
+#endif
+}
+
+static reg_t PopRegister(TraceRecorder *Rec)
 {
   reg_t Reg;
-  assert(builder->RegStackSize > 0);
-  builder->RegStackSize -= 1;
-  Reg = builder->RegStack[builder->RegStackSize];
+  if (Rec->RegStackSize == 0) {
+    PushRegister(Rec, Emit_StackPop(Rec));
+  }
+  assert(Rec->RegStackSize > 0);
+  Rec->RegStackSize -= 1;
+  Reg = Rec->RegStack[Rec->RegStackSize];
 #if DUMP_STACK_MAP > 1
-  fprintf(stderr, "pop : %d %ld\n", builder->RegStackSize, Reg);
+  fprintf(stderr, "pop : %d %ld\n", Rec->RegStackSize, Reg);
 #endif
   return Reg;
 }
 
-static void PushRegister(lir_builder_t *builder, reg_t Reg)
-{
-  if (builder->RegStackSize == builder->RegStackCapacity) {
-    unsigned newsize = builder->RegStackCapacity * 2;
-    builder->RegStack =
-        (reg_t *) lir_realloc(builder, builder->RegStack,
-                              sizeof(reg_t) * builder->RegStackCapacity,
-                              sizeof(reg_t) * newsize);
-    builder->RegStackCapacity = newsize;
-  }
-  assert(Reg >= 0);
-  builder->RegStack[builder->RegStackSize] = Reg;
-  builder->RegStackSize += 1;
-#if DUMP_STACK_MAP > 1
-  fprintf(stderr, "push: %d %ld\n", builder->RegStackSize, Reg);
-#endif
-}
 
-static reg_t TopRegister(lir_builder_t *builder, long n)
+static reg_t TopRegister(TraceRecorder *Rec, long n)
 {
-  assert(builder->RegStackSize > n && n >= 0);
-  reg_t Reg = builder->RegStack[builder->RegStackSize - n - 1];
+  assert(Rec->RegStackSize > n && n >= 0);
+  reg_t Reg = Rec->RegStack[Rec->RegStackSize - n - 1];
 #if DUMP_STACK_MAP > 1
   fprintf(stderr, "top : %ld %ld\n", n, Reg);
 #endif
   return Reg;
 }
 
-static void SetRegister(lir_builder_t *builder, long n, reg_t Reg)
+static void SetRegister(TraceRecorder *Rec, long n, reg_t Reg)
 {
-  assert(builder->RegStackSize > n && n >= 0);
+  assert(Rec->RegStackSize > n && n >= 0);
 #if DUMP_STACK_MAP > 1
-  fprintf(stderr, "set : %ld %ld\n", builder->RegStackSize - n - 1, Reg);
+  fprintf(stderr, "set : %ld %ld\n", Rec->RegStackSize - n - 1, Reg);
 #endif
-  builder->RegStack[builder->RegStackSize - n - 1] = Reg;
+  Rec->RegStack[Rec->RegStackSize - n - 1] = Reg;
 }
 
 // call stack
-static void PopCallStack(lir_builder_t *builder)
+static void PopCallStack(TraceRecorder *Rec)
 {
   int i;
   struct call_stack_struct *cs;
 
-  assert(builder->CallStackSize > 0);
-  builder->CallStackSize -= 1;
-  cs = &builder->CallStack[builder->CallStackSize];
-  while (cs->regstack_size != builder->RegStackSize) {
-    PopRegister(builder);
+  assert(Rec->CallStackSize > 0);
+  Rec->CallStackSize -= 1;
+  cs = &Rec->CallStack[Rec->CallStackSize];
+  while (cs->regstack_size != Rec->RegStackSize) {
+    PopRegister(Rec);
   }
 
   for (i = 0; i < cs->method_argc; i++) {
-    PopRegister(builder);
+    PopRegister(Rec);
   }
 
 #if DUMP_CALL_STACK_MAP > 0
   fprintf(stderr, "call pop: %d %d\n",
-          builder->CallStackSize, builder->RegStackSize);
+          Rec->CallStackSize, Rec->RegStackSize);
 #endif
 }
 
-static void PushCallStack(lir_builder_t *builder, int argc, reg_t args[])
+static void PushCallStack(TraceRecorder *Rec, int argc, reg_t args[])
 {
   int i;
-  if (builder->CallStackSize == builder->CallStackCapacity) {
-    unsigned newsize = builder->CallStackCapacity * 2;
-    builder->CallStack = (struct call_stack_struct *)
-        lir_realloc(builder, builder->CallStack,
-                    sizeof(struct call_stack_struct) * builder->CallStackCapacity,
+  if (Rec->CallStackSize == Rec->CallStackCapacity) {
+    unsigned newsize = Rec->CallStackCapacity * 2;
+    Rec->CallStack = (struct call_stack_struct *)
+        lir_realloc(Rec, Rec->CallStack,
+                    sizeof(struct call_stack_struct) * Rec->CallStackCapacity,
                     sizeof(struct call_stack_struct) * newsize);
-    builder->CallStackCapacity = newsize;
+    Rec->CallStackCapacity = newsize;
   }
 
-  builder->CallStack[builder->CallStackSize].regstack_size = builder->RegStackSize;
-  builder->CallStack[builder->CallStackSize].method_argc   = argc;
-  builder->CallStackSize += 1;
+  Rec->CallStack[Rec->CallStackSize].regstack_size = Rec->RegStackSize;
+  Rec->CallStack[Rec->CallStackSize].method_argc   = argc;
+  Rec->CallStackSize += 1;
 
   for (i = 0; i < argc; i++) {
-    PushRegister(builder, args[i]);
+    PushRegister(Rec, args[i]);
   }
 
 #if DUMP_CALL_STACK_MAP > 0
   fprintf(stderr, "call push: %d %d\n",
-          builder->CallStackSize, builder->RegStackSize);
+          Rec->CallStackSize, Rec->RegStackSize);
 #endif
 }

@@ -73,7 +73,7 @@ open(ARGV[0]) { |file|
                 end
             end
             puts "} I" + ir.name + ";\n\n"
-            print "static int Emit_#{ir.name}(lir_builder_t *builder"
+            print "static int Emit_#{ir.name}(TraceRecorder *Rec"
             ir.arg.each{|e|
                 type = e.type
                 name = e.name
@@ -102,9 +102,9 @@ open(ARGV[0]) { |file|
             }
 
             if ir.variadic
-                puts "  return ADD_INST_N(builder, ir, argc);\n"
+                puts "  return ADD_INST_N(Rec, ir, argc);\n"
             else
-                puts "  return ADD_INST(builder, ir);\n"
+                puts "  return ADD_INST(Rec, ir);\n"
             end
 
             puts "}\n"

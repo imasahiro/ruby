@@ -117,9 +117,12 @@ LoadSelf        :def ()
 LoadSelfAsBlock :def (iseq:ISEQ)
 LoadBlock       :def (iseq:ISEQ)
 
-# stack load/store instruction
-StackStore :use (Level:int, Index:int, Val:reg_t)
-StackLoad  :def (Level:int, Index:int)
+# env load/store instruction
+EnvStore :use (Level:int, Index:int, Val:reg_t)
+EnvLoad  :def (Level:int, Index:int)
+
+# stack instruction
+StackPop :def ()
 
 # invoke instruction
 InvokeMethod :def :use (ci:CALL_INFO, argc:int, argv:reg_t[])

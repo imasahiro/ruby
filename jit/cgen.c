@@ -25,10 +25,6 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <assert.h>
-#define GWJIT_HOST 1
-#include "jit_context.h"
-
-#include "verconf.h"
 
 static gwjit_context_t jit_host_context = {};
 
@@ -175,7 +171,7 @@ typedef struct CGen {
 static const char cmd_template[] = "clang -pipe -x c "
 "%s %s "
 "-Ijit/ -Ibuild/ -Ibuild/.ext/include/x86_64-darwin13 -Iinclude -I. "
-"-dynamiclib -O3 -g0 -Wall -o %s %s";
+"-dynamiclib -O" GWIT_CGEN_OPT_LEVEL " -g" GWIT_CGEN_DBG_LEVEL " -Wall -o %s %s";
 
 static size_t find_parent_path_end(char *buf, size_t path_len)
 {
@@ -409,13 +405,13 @@ static void generate_fixnum_cond(CGen *gen, const char *op, long Id, reg_t LHS, 
 
 // convert LIR to C code
 
-static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs, lir_compile_data_header_t *Inst);
+static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, lir_compile_data_header_t *Inst);
 
-static void PrepareSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs)
+static void PrepareSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
 {
   long j = 1;
   hashmap_iterator_t itr = {0, 0};
-  while(hashmap_next(&builder->Current->SideExit, &itr)) {
+  while(hashmap_next(&TraceRecorderGetTrace(Rec)->SideExit, &itr)) {
     VALUE *pc = itr.entry->k;
     hashmap_set(SideExitBBs, pc, (struct Trace *)(j << 1));
     cgen_printf(gen, "VALUE *exit_pc_%ld = (VALUE *) %p;\n", j, pc);
@@ -423,9 +419,9 @@ static void PrepareSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideEx
   }
 }
 
-static void EmitFramePush(lir_builder_t *builder, CGen *cgen, IFramePush *ir);
+static void EmitFramePush(TraceRecorder *Rec, CGen *cgen, IFramePush *ir);
 
-static void EmitSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs)
+static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
 {
   /*
      sp[0..n] = StackMap[0..n]
@@ -436,7 +432,8 @@ static void EmitSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitB
   while(hashmap_next(SideExitBBs, &itr)) {
     VALUE *pc = itr.entry->k;
     long BlockId = ((long) itr.entry->v) >> 1;
-    StackMap *stack = GetStackMap(builder, pc);
+    TraceExitStatus status;
+    StackMap *stack = GetStackMap(Rec, pc);
 
     cgen_printf(gen, "L_exit%ld:;\n", BlockId);
     cgen_printf(gen, "//fprintf(stderr,\"exit%ld : pc=%p\\n\");\n", BlockId, pc);
@@ -445,12 +442,12 @@ static void EmitSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitB
     cgen_printf(gen, "th->cfp = reg_cfp = original_cfp;\n");
     cgen_printf(gen, "SET_SP(original_sp);\n");
     for (i = 0; i < stack->size; i++) {
-      lir_compile_data_header_t *Inst = FindLIRById(builder, stack->regs[i]);
+      lir_compile_data_header_t *Inst = FindLIRById(Rec, stack->regs[i]);
       if (Inst->opcode == OPCODE_IFramePush) {
         IFramePush *ir = (IFramePush *) Inst;
         int offset = j - (ir->invokeblock ? 1 : 0);
         cgen_printf(gen, "SET_SP(GET_SP() + %d);\n", offset);
-        EmitFramePush(builder, gen, ir);
+        EmitFramePush(Rec, gen, ir);
         j = 0;
       }
       else {
@@ -462,12 +459,13 @@ static void EmitSideExit(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitB
     cgen_printf(gen,
                 "SET_SP(GET_SP() + %d);\n"
                 "SET_PC(exit_pc_%ld);\n"
-                "return exit_pc_%ld;\n",
-                j, BlockId, BlockId);
+                "*exit_pc = exit_pc_%ld;\n"
+                "return %s;\n",
+                j, BlockId, BlockId, TraceStatusToStr(stack->flag));
   }
 }
 
-static void EmitFramePush(lir_builder_t *builder, CGen *gen, IFramePush *ir)
+static void EmitFramePush(TraceRecorder *Rec, CGen *gen, IFramePush *ir)
 {
   int i, begin = ir->invokeblock ? 1 : 0;
   cgen_printf(gen,
@@ -504,11 +502,11 @@ static void EmitFramePush(lir_builder_t *builder, CGen *gen, IFramePush *ir)
   cgen_printf(gen, "}\n");
 }
 
-static void Translate(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs, int fid)
+static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, int fid)
 {
-  BasicBlock *block = builder->EntryBlock;
+  BasicBlock *block = Rec->EntryBlock;
 #if GWJIT_DUMP_COMPILE_LOG > 0
-  const rb_iseq_t *iseq = builder->Current->iseq;
+  const rb_iseq_t *iseq = TraceRecorderGetTrace(Rec)->iseq;
   VALUE file = iseq->location.path;
 #endif
 
@@ -526,20 +524,22 @@ static void Translate(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs,
               "  (void) jit_vm_call_iseq_setup_normal;\n"
               "  (void) jit_vm_yield_setup_block_args;\n"
               "}\n"
-              "VALUE *gwjit_%d(rb_thread_t *th,\n"
-              "                rb_control_frame_t *reg_cfp,\n"
-              "                VALUE *reg_pc)\n"
+              "TraceExitStatus gwjit_%d(rb_thread_t *th,\n"
+              "    rb_control_frame_t *reg_cfp,\n"
+              "    VALUE *reg_pc,\n"
+              "    VALUE **exit_pc)\n"
               "{\n"
               "  VALUE *original_sp = GET_SP();\n"
               "  rb_control_frame_t *original_cfp = reg_cfp;\n",
 #if GWJIT_DUMP_COMPILE_LOG > 0
               RSTRING_PTR(file),
               rb_iseq_line_no(iseq,
-                              builder->Current->StartPC - iseq->iseq_encoded),
+                              TraceRecorderGetTrace(Rec)->StartPC -
+                              iseq->iseq_encoded),
 #endif
               fid, fid);
 
-  PrepareSideExit(builder, gen, SideExitBBs);
+  PrepareSideExit(Rec, gen, SideExitBBs);
   cgen_printf(gen, "VALUE v0 = 0; (void) v0;\n");
 
   while(block != NULL) {
@@ -555,22 +555,22 @@ static void Translate(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs,
     block = (BasicBlock *) block->base.next;
   }
 
-  block = builder->EntryBlock;
+  block = Rec->EntryBlock;
   while(block != NULL) {
     unsigned i = 0;
     cgen_printf(gen, "L_%d:;\n", block->base.id);
     //cgen_printf(gen, "fprintf(stderr, \"block%d\\n\");\n", block->base.id);
     for (i = 0; i < block->size; i++) {
       lir_compile_data_header_t *Inst = block->Insts[i];
-      TranslateLIR2C(builder, gen, SideExitBBs, Inst);
+      TranslateLIR2C(Rec, gen, SideExitBBs, Inst);
     }
     block = (BasicBlock *) block->base.next;
   }
-  EmitSideExit(builder, gen, SideExitBBs);
+  EmitSideExit(Rec, gen, SideExitBBs);
   cgen_printf(gen, "}\n");
 }
 
-static native_func_t TranslateToNativeCode(lir_builder_t *builder)
+static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
 {
   static int serial_id = 0;
   char path[128] = {};
@@ -591,7 +591,7 @@ static native_func_t TranslateToNativeCode(lir_builder_t *builder)
   hashmap_t SideExitBBs;
   hashmap_init(&SideExitBBs, 4);
 
-  Translate(builder, &gen, &SideExitBBs, id);
+  Translate(Rec, &gen, &SideExitBBs, id);
 
   cgen_freeze(&gen, id);
 
@@ -602,11 +602,7 @@ static native_func_t TranslateToNativeCode(lir_builder_t *builder)
   return ptr;
 }
 
-static void finalize_codegen(lir_builder_t *builder)
-{
-}
-
-static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExitBBs, lir_compile_data_header_t *Inst)
+static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, lir_compile_data_header_t *Inst)
 {
   long Id = lir_getid(Inst);
   switch (Inst->opcode) {
@@ -1351,8 +1347,8 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
       cgen_printf(gen, "v%ld = (VALUE) 0x%lx;\n", Id, ir->Val);
       break;
     }
-    case OPCODE_IStackStore : {
-      IStackStore *ir = (IStackStore *) Inst;
+    case OPCODE_IEnvStore : {
+      IEnvStore *ir = (IEnvStore *) Inst;
       if (ir->Level > 0) {
         cgen_printf(gen,
                     "{\n"
@@ -1372,8 +1368,8 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
       }
       break;
     }
-    case OPCODE_IStackLoad : {
-      IStackLoad *ir = (IStackLoad *) Inst;
+    case OPCODE_IEnvLoad : {
+      IEnvLoad *ir = (IEnvLoad *) Inst;
       if (ir->Level > 0) {
         cgen_printf(gen,
                     "{\n"
@@ -1392,6 +1388,13 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
       }
       break;
     }
+    case OPCODE_IStackPop : {
+      cgen_printf(gen,
+                  "  v%ld = *POP();\n"
+                  "  original_sp -= 1;\n", Id);
+      break;
+    }
+
     case OPCODE_IInvokeMethod : {
       IInvokeMethod *ir = (IInvokeMethod *) Inst;
       int i;
@@ -1426,7 +1429,7 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
     }
     case OPCODE_IJump : {
       IJump *ir = (IJump *) Inst;
-      BasicBlock *BB = FindBasicBlockByPC(builder, ir->TargetBB);
+      BasicBlock *BB = FindBasicBlockByPC(Rec, ir->TargetBB);
       cgen_printf(gen, "goto L_%d;\n", BB->base.id);
       break;
     }
@@ -1442,7 +1445,7 @@ static void TranslateLIR2C(lir_builder_t *builder, CGen *gen, hashmap_t *SideExi
     }
     case OPCODE_IFramePush : {
       IFramePush *ir = (IFramePush *) Inst;
-      EmitFramePush(builder, gen, ir);
+      EmitFramePush(Rec, gen, ir);
       break;
     }
     case OPCODE_IFramePop : {

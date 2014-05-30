@@ -2,8 +2,8 @@
 
 source_dir = "."
 target_dir = "build"
-opt        = 3
-debug      = 0
+opt        = 0
+debug      = 3
 
 if ARGV.size != 0
     target_dir = ARGV[0]

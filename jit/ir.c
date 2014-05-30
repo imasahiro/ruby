@@ -44,10 +44,41 @@ static long lir_getid(lir_compile_data_header_t *ir)
   return (long) ir->id;
 }
 
-// FIXME this function is super slow!!!
-static lir_compile_data_header_t *FindLIRById(lir_builder_t *builder, reg_t Reg)
+static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc)
 {
-  BasicBlock *block = builder->EntryBlock;
+  BasicBlock *bb = (BasicBlock *) lir_alloc(Rec, sizeof(BasicBlock));
+  //fprintf(stderr, "newblock=(%p, %p)\n", bb, pc);
+  bb->base.flag = 0;
+  bb->base.next = NULL;
+  bb->start_pc  = pc;
+  bb->size      = 0;
+  bb->capacity  = 1;
+  bb->Insts     = (lir_compile_data_header_t **)
+      lir_alloc(Rec, sizeof(lir_compile_data_header_t *) * 1);
+  if (Rec->Block != NULL) {
+    Rec->Block->base.next = (lir_compile_data_header_t *) bb;
+  }
+
+  Rec->Block = bb;
+  return bb;
+}
+
+static BasicBlock *FindBasicBlockByPC(TraceRecorder *Rec, VALUE *pc)
+{
+  BasicBlock *bb = Rec->EntryBlock;
+  while(bb != NULL) {
+    if (pc == bb->start_pc) {
+      return bb;
+    }
+    bb = (BasicBlock *) bb->base.next;
+  }
+  return NULL;
+}
+
+// FIXME this function is super slow!!!
+static lir_compile_data_header_t *FindLIRById(TraceRecorder *Rec, reg_t Reg)
+{
+  BasicBlock *block = Rec->EntryBlock;
   while(block != NULL) {
     unsigned i = 0;
     for (i = 0; i < block->size; i++) {
@@ -69,25 +100,25 @@ static void *lir_inst_init(void *ptr, unsigned opcode)
   return inst;
 }
 
-static int AddInst(lir_builder_t *builder, lir_compile_data_header_t *inst, size_t inst_size);
+static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst, size_t inst_size);
 
 #define LIR_NEWINST(T) \
     ((T*) lir_inst_init(alloca(sizeof(T)), OPCODE_##T))
 #define LIR_NEWINST_N(T, SIZE) \
     ((T*) lir_inst_init(alloca(sizeof(T) + sizeof(reg_t) * (SIZE)), OPCODE_##T))
 
-#define ADD_INST(BUILDER, INST) ADD_INST_N(BUILDER, INST, 0)
+#define ADD_INST(REC, INST) ADD_INST_N(REC, INST, 0)
 
-#define ADD_INST_N(BUILDER, INST, SIZE) \
-    AddInst(BUILDER, &(INST)->base, sizeof(*INST) + sizeof(reg_t) * (SIZE))
+#define ADD_INST_N(REC, INST, SIZE) \
+    AddInst(REC, &(INST)->base, sizeof(*INST) + sizeof(reg_t) * (SIZE))
 
 #include "gwir.c"
 
-static int peephole(lir_builder_t *builder, lir_compile_data_header_t *inst)
+static int peephole(TraceRecorder *Rec, lir_compile_data_header_t *inst)
 {
   if (inst->opcode == OPCODE_IGuardTypeFixnum) {
     IGuardTypeFixnum *ir = (IGuardTypeFixnum *) inst;
-    lir_compile_data_header_t *src = FindLIRById(builder, ir->R);
+    lir_compile_data_header_t *src = FindLIRById(Rec, ir->R);
     if (src && src->opcode == OPCODE_ILoadConstFixnum) {
       return -1;
     }
@@ -96,7 +127,7 @@ static int peephole(lir_builder_t *builder, lir_compile_data_header_t *inst)
   if (inst->opcode == OPCODE_IGuardTypeFlonum ||
       inst->opcode == OPCODE_IGuardTypeFloat) {
     IGuardTypeFloat *ir = (IGuardTypeFloat *) inst;
-    lir_compile_data_header_t *src = FindLIRById(builder, ir->R);
+    lir_compile_data_header_t *src = FindLIRById(Rec, ir->R);
     if (src && src->opcode == OPCODE_ILoadConstFloat) {
       return -1;
     }
@@ -104,7 +135,7 @@ static int peephole(lir_builder_t *builder, lir_compile_data_header_t *inst)
 
   //  if (inst->opcode == OPCODE_IGuardTypeSpecialConst) {
   //    IGuardTypeFloat *ir = (IGuardTypeFloat *) inst;
-  //    lir_compile_data_header_t *src = FindLIRById(builder, ir->R);
+  //    lir_compile_data_header_t *src = FindLIRById(Rec, ir->R);
   //    if (src && src->opcode == OPCODE_LoadConstFloat) {
   //      return -1;
   //    }
@@ -112,7 +143,7 @@ static int peephole(lir_builder_t *builder, lir_compile_data_header_t *inst)
   //
   //  if (inst->opcode == OPCODE_IGuardType) {
   //    IGuardType *ir = (IGuardType *) inst;
-  //    lir_compile_data_header_t *src = FindLIRById(builder, ir->Reg);
+  //    lir_compile_data_header_t *src = FindLIRById(Rec, ir->Reg);
   //    if (src && src->opcode == OPCODE_ILoadObject) {
   //      ILoadObject *lo = (ILoadObject *) src;
   //      if (ir->klass == RBASIC_CLASS(lo->O)) {
@@ -139,10 +170,10 @@ static int lir_inst_define_value(int opcode)
 static void dump_lir_inst(lir_compile_data_header_t *Inst);
 #endif /* DUMP_LIR > 0*/
 
-static int AddInst(lir_builder_t *builder, lir_compile_data_header_t *inst, size_t inst_size)
+static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst, size_t inst_size)
 {
-  BasicBlock *bb = builder->Block;
-  int opt = peephole(builder, inst);
+  BasicBlock *bb = Rec->Block;
+  int opt = peephole(Rec, inst);
   if (opt != 0) {
     return opt;
   }
@@ -150,12 +181,12 @@ static int AddInst(lir_builder_t *builder, lir_compile_data_header_t *inst, size
   if (bb->size == bb->capacity) {
     unsigned newsize = bb->capacity * 2;
     bb->Insts = (lir_compile_data_header_t **)
-        lir_realloc(builder, bb->Insts,
+        lir_realloc(Rec, bb->Insts,
                     sizeof(lir_compile_data_header_t *) * bb->capacity,
                     sizeof(lir_compile_data_header_t *) * newsize);
     bb->capacity = newsize;
   }
-  lir_compile_data_header_t *buf = lir_alloc(builder, inst_size);
+  lir_compile_data_header_t *buf = lir_alloc(Rec, inst_size);
   int newid = buf->id;
   memcpy(buf, inst, inst_size);
   buf->id = newid;
@@ -190,14 +221,14 @@ static void dump_lir_block(BasicBlock *block)
   }
 }
 
-static void dump_side_exit(lir_builder_t *builder)
+static void dump_side_exit(TraceRecorder *Rec)
 {
   unsigned i;
   hashmap_iterator_t itr = {0, 0};
-  while(hashmap_next(&builder->Current->SideExit, &itr)) {
+  while(hashmap_next(&TraceRecorderGetTrace(Rec)->SideExit, &itr)) {
     VALUE *pc = itr.entry->k;
-    fprintf(stderr, "side exit: pc=%p: ", pc);
-    StackMap *stack = GetStackMap(builder, pc);
+    StackMap *stack = GetStackMap(Rec, pc);
+    fprintf(stderr, "side exit: pc=%p: %s ", pc, TraceStatusToStr(stack->flag));
     for (i = 0; i < stack->size; i++) {
       fprintf(stderr, "  [%d] = %04ld;", i, stack->regs[i]);
     }
@@ -206,10 +237,10 @@ static void dump_side_exit(lir_builder_t *builder)
 }
 #endif /* DUMP_LIR > 0 */
 
-static void dump_lir(lir_builder_t *builder)
+static void dump_lir(TraceRecorder *Rec)
 {
 #if DUMP_LIR > 0
-  BasicBlock *entry = builder->EntryBlock;
+  BasicBlock *entry = Rec->EntryBlock;
   BasicBlock *block = entry;
   fprintf(stderr, "---------------\n");
   while(block != NULL) {
@@ -217,7 +248,17 @@ static void dump_lir(lir_builder_t *builder)
     block = (BasicBlock *) block->base.next;
   }
   fprintf(stderr, "---------------\n");
-  dump_side_exit(builder);
+  dump_side_exit(Rec);
   fprintf(stderr, "---------------\n");
+#endif
+}
+
+static int  get_opcode(rb_control_frame_t *cfp, VALUE *pc);
+static void dump_inst(rb_control_frame_t *reg_cfp, VALUE *reg_pc)
+{
+#if DUMP_INST > 0
+  long pc = GET_PC_COUNT();
+  int  op = get_opcode(reg_cfp, reg_pc);
+  fprintf(stderr, "%04ld pc=%p %02d %s\n", pc, reg_pc, op, rb_insns_name(op));
 #endif
 }

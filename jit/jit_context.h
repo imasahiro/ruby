@@ -47,6 +47,7 @@ typedef struct gwjit_context {
   VALUE (*_rb_ary_new_from_values)(long n, const VALUE *elts);
   VALUE (*_rb_gvar_get)(struct rb_global_entry *);
   VALUE (*_rb_gvar_set)(struct rb_global_entry *, VALUE);
+  VALUE (*_rb_class_new_instance)(int argc, const VALUE *argv, VALUE klass);
 
   // Internal ruby APIs
   double (*_ruby_float_mod)(double, double);

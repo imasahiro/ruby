@@ -8,12 +8,6 @@
 
  **********************************************************************/
 
-static int IsLoopEdge(struct Trace *trace, VALUE *reg_pc, int op)
-{
-  assert(0);
-  return 0;
-}
-
 /* original code is copied from vm_insnhelper.c vm_getivar() */
 static int
 vm_load_cache(VALUE obj, ID id, IC ic, rb_call_info_t *ci, int is_attr)
@@ -116,80 +110,36 @@ static reg_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
   return Rval;
 }
 
-static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci, rb_block_t *block, reg_t Rblock)
+static void EmitPushFrame(TraceRecorder *Rec, VALUE *reg_pc, CALL_INFO ci, reg_t Rblock, rb_block_t *block)
 {
-  reg_t Rrecv, Rval = -1;
   int i, argc = ci->argc + 1/*recv*/;
-  int cacheable = 0;
   reg_t argv[argc];
-  VALUE obj = TOPN(ci->argc);
-
-  vm_search_method(ci, ci->recv = TOPN(ci->argc));
-
-  // check method type
-  if(ci->me) {
-    // getter method
-    if(ci->me->def->type == VM_METHOD_TYPE_IVAR) {
-      goto emit_attribute;
-    }
-    // setter method
-    if(ci->me->def->type == VM_METHOD_TYPE_ATTRSET) {
-      goto emit_attribute;
-    }
-    // user defined ruby method
-    if (ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
-      goto emit_push_frame;
-    }
-  }
-
-  // check Math method
-  if (ci->me && ci->me->def->type == VM_METHOD_TYPE_CFUNC) {
-    VALUE cMath = rb_singleton_class(rb_mMath);
-    if (ci->me->klass == cMath) {
-      goto emit_math_api;
-    }
-  }
-
-  // check ClassA.new(argc, argv)
-  if (check_cfunc(ci->me,  rb_class_new_instance)) {
-    if (ci->me->klass == rb_cClass) {
-      //fprintf(stderr, "new\n");
-    }
-  }
-
-  // check block_given?
-  extern VALUE rb_f_block_given_p(void);
-  if (check_cfunc(ci->me,  rb_f_block_given_p)) {
-    goto emit_block_given;
-  }
-
-  // unreachable
-  TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_NATIVE_METHOD);
-  return;
-
-emit_push_frame:
-  Rec->CallDepth += 1;
   for (i = 0; i < argc; i++) {
     argv[i] = _TOPN(ci->argc - i);
   }
+  Rec->CallDepth += 1;
   EmitIR(GuardMethodCache, reg_pc, argv[0], ci);
   if (Rblock) {
     EmitIR(GuardBlockEqual, reg_pc, Rblock, (VALUE) block);
   }
   PushCallStack(Rec, argc, argv);
   _PUSH(EmitIR(FramePush, ci, 0, Rblock, argc, argv));
-  return;
+}
 
-emit_attribute:
-  if (ci->argc == 1) {
-    Rval  = _POP();
+
+static void EmitAttribute(TraceRecorder *Rec, VALUE *reg_pc, int getter, CALL_INFO ci)
+{
+  reg_t Rval, Rrecv = 0;
+  if (getter) {
     Rrecv = _POP();
   }
   else {
+    Rval  = _POP();
     Rrecv = _POP();
   }
 
-  cacheable = vm_load_cache(obj, ci->me->def->body.attr.id, 0, ci, 1);
+  VALUE obj = ci->recv;
+  int cacheable = vm_load_cache(obj, ci->me->def->body.attr.id, 0, ci, 1);
   assert(ci->aux.index > 0 && cacheable);
   EmitIR(GuardTypeObject, reg_pc, Rrecv);
   EmitIR(GuardProperty, reg_pc, Rrecv, 1/*is_attr*/, (void *)ci);
@@ -200,9 +150,12 @@ emit_attribute:
     assert(ci->argc == 1);
     _PUSH(EmitIR(SetPropertyName, Rrecv, ci->aux.index - 1, Rval));
   }
-  return;
+}
 
-emit_math_api:
+static void EmitMathAPI(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci)
+{
+  reg_t Rrecv;
+  VALUE obj;
   if(ci->orig_argc == 1) {
     Rrecv = _POP();
     obj   = TOPN(0);
@@ -244,15 +197,79 @@ emit_math_api:
   // unsupported math api
   fprintf(stderr, "unsupported math api\n");
   TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_NATIVE_METHOD);
+}
+
+static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci)
+{
+  int i, argc = ci->argc;
+  reg_t argv[argc];
+  reg_t klass = _TOPN(ci->argc);
+
+  TakeStackSnapshot(Rec, reg_pc);
+  if ((ci->flag & VM_CALL_ARGS_BLOCKARG) || ci->blockiseq != 0) {
+    fprintf(stderr, "Class.new with block is not supported\n");
+    TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_UNSUPPORT_OP);
+    return;
+  }
+
+  for (i = 0; i < argc; i++) {
+    argv[argc - i - 1] = _POP();
+  }
+  assert(klass == _POP());
+
+  _PUSH(EmitIR(AllocObject, klass, argc, argv));
+}
+
+static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci, rb_block_t *block, reg_t Rblock)
+{
+  reg_t Rrecv;
+  VALUE obj = TOPN(ci->argc);
+
+  vm_search_method(ci, ci->recv = TOPN(ci->argc));
+
+  // check method type
+  if(ci->me) {
+    // getter method
+    if(ci->me->def->type == VM_METHOD_TYPE_IVAR) {
+      return EmitAttribute(Rec, reg_pc, 1, ci);
+    }
+    // setter method
+    if(ci->me->def->type == VM_METHOD_TYPE_ATTRSET) {
+      return EmitAttribute(Rec, reg_pc, 0, ci);
+    }
+    // user defined ruby method
+    if (ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
+      return EmitPushFrame(Rec, reg_pc, ci, Rblock, block);
+    }
+  }
+
+  // check Math method
+  if (ci->me && ci->me->def->type == VM_METHOD_TYPE_CFUNC) {
+    VALUE cMath = rb_singleton_class(rb_mMath);
+    if (ci->me->klass == cMath) {
+      return EmitMathAPI(Rec, reg_cfp, reg_pc, ci);
+    }
+  }
+
+  // check ClassA.new(argc, argv)
+  if (check_cfunc(ci->me,  rb_class_new_instance)) {
+    if (ci->me->klass == rb_cClass) {
+      return EmitNewInstance(Rec, reg_cfp, reg_pc, ci);
+    }
+  }
+
+  // check block_given?
+  extern VALUE rb_f_block_given_p(void);
+  if (check_cfunc(ci->me,  rb_f_block_given_p)) {
+    Rrecv = EmitIR(LoadSelf);
+    EmitIR(GuardMethodCache, reg_pc, Rrecv, ci);
+    EmitIR(InvokeNative, rb_f_block_given_p, 0, NULL);
+    return;
+  }
+
+  // unreachable
+  TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_NATIVE_METHOD);
   return;
-
-emit_block_given:
-  Rrecv = EmitIR(LoadSelf);
-  EmitIR(GuardMethodCache, reg_pc, Rrecv, ci);
-  EmitIR(InvokeNative, rb_f_block_given_p, 0, argv);
-  return;
-
-
 }
 
 static void _record_getlocal(TraceRecorder *Rec, rb_num_t level, lindex_t idx)
@@ -305,8 +322,7 @@ static void record_getinstancevariable(TraceRecorder *Rec, rb_control_frame_t *r
   VALUE obj = GET_SELF();
   reg_t Rrecv = EmitIR(LoadSelf);
 
-  int cacheable = vm_load_cache(obj, id, ic, NULL, 0);
-  if (cacheable) {
+  if (vm_load_cache(obj, id, ic, NULL, 0)) {
     TakeStackSnapshot(Rec, reg_pc);
     EmitIR(GuardTypeObject, reg_pc, Rrecv);
     EmitIR(GuardProperty, reg_pc, Rrecv, 0/*!is_attr*/, (void *) ic);
@@ -608,7 +624,17 @@ static void record_defined(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALU
 
 static void record_checkmatch(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  not_support_op(Rec, reg_cfp, reg_pc, "checkmatch");
+  reg_t Rpattern = _POP();
+  reg_t Rtarget  = _POP();
+  rb_event_flag_t flag = (rb_event_flag_t) GET_OPERAND(1);
+  enum vm_check_match_type checkmatch_type =
+      (enum vm_check_match_type)(flag & VM_CHECKMATCH_TYPE_MASK);
+  if (flag & VM_CHECKMATCH_ARRAY) {
+    _PUSH(EmitIR(PatternMatchRange, Rpattern, Rtarget, checkmatch_type));
+  }
+  else {
+    _PUSH(EmitIR(PatternMatch, Rpattern, Rtarget, checkmatch_type));
+  }
 }
 
 static void record_trace(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
@@ -758,7 +784,6 @@ static void record_jump(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *
 
 static void record_branchif(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  Trace *trace = TraceRecorderGetTrace(Rec);
   OFFSET dst = (OFFSET)GET_OPERAND(1);
   reg_t Rval = _POP();
   VALUE val  = TOPN(0);

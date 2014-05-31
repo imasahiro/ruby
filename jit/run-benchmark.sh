@@ -62,12 +62,15 @@ make -j8 -C build
 ruby ./jit/make_pch.rb
 rm -rf bmlog-* /tmp/gwjit.*
 
-#mkdir -p benchmark-tmp
-#for i in $LIST; do
-#    cp $i benchmark-tmp/
-#done
-#rm -rf benchmark-tmp
-
+mkdir -p benchmark-tmp
+for i in $LIST; do
+    cp $i benchmark-tmp/
+done
 ruby ./benchmark/driver.rb \
-            --executables="ruby; built-ruby::build/ruby" \
-            --pattern='bm_' --directory=./benchmark
+            --executables="ruby; built-ruby::build/miniruby" \
+            --pattern='bm_' --directory=./benchmark-tmp
+rm -rf benchmark-tmp
+
+#ruby ./benchmark/driver.rb \
+#            --executables="ruby; built-ruby::build/ruby" \
+#            --pattern='bm_' --directory=./benchmark

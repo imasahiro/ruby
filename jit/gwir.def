@@ -12,6 +12,7 @@ GuardTypeObject       :use (Exit:VALUEPtr, R:reg_t)
 GuardTypeNil          :use (Exit:VALUEPtr, R:reg_t)
 GuardTypeNonNil       :use (Exit:VALUEPtr, R:reg_t)
 GuardBlockEqual       :use (Exit:VALUEPtr, R:reg_t, Block:VALUE)
+GuardObjectEqual      :use (Exit:VALUEPtr, R:reg_t, Obj:VALUE)
 GuardProperty         :use (Exit:VALUEPtr, R:reg_t, is_attr:int, cache:voidPtr)
 GuardMethodCache      :use (Exit:VALUEPtr, R:reg_t, ci:CALL_INFO)
 GuardMethodRedefine        (Exit:VALUEPtr, klass:VALUE, bop:int)
@@ -92,6 +93,7 @@ HashSet    :def :use (Recv:reg_t, Index:reg_t, Val:reg_t)
 RegExpMatch :def :use (Re:reg_t, Str:reg_t)
 
 # alloc instruction
+AllocObject :def      (Klass:reg_t, argc:int, argv:reg_t[])
 AllocArray  :def      (argc:int, argv:reg_t[])
 AllocHash   :def      (argc:int, argv:reg_t[])
 AllocString :def :use (OrigStr:reg_t)
@@ -129,7 +131,12 @@ InvokeMethod :def :use (ci:CALL_INFO, argc:int, argv:reg_t[])
 InvokeBlock  :def :use (ci:CALL_INFO, argc:int, argv:reg_t[])
 InvokeNative :def :use (fptr:voidPtr, argc:int, argv:reg_t[])
 
+# pattern match instruction
+PatternMatch      :def :use (Pattern:reg_t, Target:reg_t, flag:rb_event_flag_t)
+PatternMatchRange :def :use (Pattern:reg_t, Target:reg_t, flag:rb_event_flag_t)
+
 # control flow
+Exit             (Exit:VALUEPtr)
 Jump             (TargetBB:VALUEPtr)
 JumpIf      :use (TargetBB:VALUEPtr, Cond:reg_t)
 Throw  :def :use (Reg:reg_t)

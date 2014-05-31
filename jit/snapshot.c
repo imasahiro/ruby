@@ -95,15 +95,18 @@ static reg_t PopRegister(TraceRecorder *Rec)
   if (Rec->RegStackSize == 0) {
     PushRegister(Rec, Emit_StackPop(Rec));
   }
-  assert(Rec->RegStackSize > 0);
-  Rec->RegStackSize -= 1;
-  Reg = Rec->RegStack[Rec->RegStackSize];
+  if(Rec->RegStackSize > 0) {
+    Rec->RegStackSize -= 1;
+    Reg = Rec->RegStack[Rec->RegStackSize];
+  }
+  else {
+    Reg = Rec->StackBottom;
+  }
 #if DUMP_STACK_MAP > 1
   fprintf(stderr, "pop : %d %ld\n", Rec->RegStackSize, Reg);
 #endif
   return Reg;
 }
-
 
 static reg_t TopRegister(TraceRecorder *Rec, long n)
 {
@@ -127,7 +130,7 @@ static void SetRegister(TraceRecorder *Rec, long n, reg_t Reg)
 // call stack
 static void PopCallStack(TraceRecorder *Rec)
 {
-  int i;
+  unsigned i;
   struct call_stack_struct *cs;
 
   assert(Rec->CallStackSize > 0);

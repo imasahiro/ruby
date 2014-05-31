@@ -8,10 +8,6 @@
 
  **********************************************************************/
 
-typedef VALUE *VALUEPtr;
-typedef void  *voidPtr;
-typedef BasicBlock *BasicBlockPtr;
-
 #define FMT(T) FMT_##T
 #define FMT_int      "%d"
 #define FMT_long     "%ld"
@@ -73,6 +69,17 @@ static BasicBlock *FindBasicBlockByPC(TraceRecorder *Rec, VALUE *pc)
     bb = (BasicBlock *) bb->base.next;
   }
   return NULL;
+}
+
+static unsigned CountLIRInstSize(TraceRecorder *Rec)
+{
+  BasicBlock *block = Rec->EntryBlock;
+  unsigned sum = 0;
+  while(block != NULL) {
+    sum += block->size;
+    block = (BasicBlock *) block->base.next;
+  }
+  return sum;
 }
 
 // FIXME this function is super slow!!!
@@ -254,6 +261,7 @@ static void dump_lir(TraceRecorder *Rec)
 }
 
 static int  get_opcode(rb_control_frame_t *cfp, VALUE *pc);
+
 static void dump_inst(rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
 #if DUMP_INST > 0

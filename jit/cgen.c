@@ -59,6 +59,7 @@ static void gwjit_context_init()
   jit_host_context._rb_reg_match  = rb_reg_match;
   jit_host_context._rb_ary_new    = rb_ary_new;
   jit_host_context._rb_ary_new_from_values = rb_ary_new_from_values;
+  jit_host_context._rb_class_new_instance = rb_class_new_instance;
 
 
   // internal APIs
@@ -432,7 +433,6 @@ static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
   while(hashmap_next(SideExitBBs, &itr)) {
     VALUE *pc = itr.entry->k;
     long BlockId = ((long) itr.entry->v) >> 1;
-    TraceExitStatus status;
     StackMap *stack = GetStackMap(Rec, pc);
 
     cgen_printf(gen, "L_exit%ld:;\n", BlockId);
@@ -768,6 +768,12 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
                   "}\n",
                   (int) ir->bop, (int)vm_redefinition_check_flag(ir->klass),
                   ExitBlockId);
+      break;
+    }
+    case OPCODE_IExit : {
+      IExit *ir = (IExit *) Inst;
+      BasicBlock *BB = FindBasicBlockByPC(Rec, ir->Exit);
+      cgen_printf(gen, "goto L_exit%d;\n", BB->base.id);
       break;
     }
     case OPCODE_IFixnumAdd : {
@@ -1212,6 +1218,22 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
                   Id, ir->Re, ir->Str);
       break;
     }
+    case OPCODE_IAllocObject : {
+      IAllocObject *ir = (IAllocObject *) Inst;
+      int i;
+      cgen_printf(gen,
+                  "{\n"
+                  "  long num = %d;\n"
+                  "  VALUE argv[%d];\n", ir->argc, ir->argc);
+      for (i = 0; i < ir->argc; i++) {
+        cgen_printf(gen, "argv[%d + 1] = v%ld;\n", i, ir->argv[i]);
+      }
+      cgen_printf(gen,
+                  "  v%ld = rb_class_new_instance(num, argv, v%ld);\n"
+                  "}\n", Id, ir->Klass);
+      break;
+    }
+
     case OPCODE_IAllocArray : {
       IAllocArray *ir = (IAllocArray *) Inst;
       int i;
@@ -1425,6 +1447,44 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
         cgen_printf(gen, "v%ld", ir->argv[i]);
       }
       cgen_printf(gen, ");\n");
+      break;
+    }
+    case OPCODE_IPatternMatch : {
+      IPatternMatch *ir = (IPatternMatch *) Inst;
+      cgen_printf(gen,
+                  "{\n"
+                  "  enum vm_check_match_type checkmatch_type =\n"
+                  "       (enum vm_check_match_type) %ld\n\n"
+                  "  VALUE result = Qfalse;\n"
+                  "  VALUE pattern = v%ld;\n"
+                  "  VALUE target  = v%ld;\n"
+                  "  if (RTEST(check_match(pattern, target, checkmatch_type))) {\n"
+                  "    result = Qtrue;\n"
+                  "  }\n"
+                  "  v%ld = result;\n"
+                  "}\n", ir->flag, ir->Pattern, ir->Target, Id);
+      break;
+    }
+
+    case OPCODE_IPatternMatchRange : {
+      IPatternMatchRange *ir = (IPatternMatchRange *) Inst;
+      cgen_printf(gen,
+                  "{\n"
+                  "  int i;\n"
+                  "  enum vm_check_match_type checkmatch_type =\n"
+                  "       (enum vm_check_match_type) %ld\n\n"
+                  "  VALUE result = Qfalse;\n"
+                  "  VALUE pattern = v%ld;\n"
+                  "  VALUE target  = v%ld;\n"
+                  "  for (i = 0; i < RARRAY_LEN(pattern); i++) {\n"
+                  "    if (RTEST(check_match(RARRAY_AREF(pattern, i), target,\n"
+                  "                          checkmatch_type))) {\n"
+                  "      result = Qtrue;\n"
+                  "      break;\n"
+                  "    }\n"
+                  "  }\n"
+                  "  v%ld = result;\n"
+                  "}\n", ir->flag, ir->Pattern, ir->Target, Id);
       break;
     }
     case OPCODE_IJump : {

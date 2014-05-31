@@ -30,6 +30,9 @@
 
 typedef long reg_t;
 
+typedef VALUE *VALUEPtr;
+typedef void  *voidPtr;
+
 struct Event;
 typedef struct TraceRecorder TraceRecorder;
 
@@ -49,6 +52,7 @@ typedef struct lir_basic_block {
   unsigned capacity;
   VALUE *start_pc;
 } BasicBlock;
+typedef BasicBlock *BasicBlockPtr;
 
 static int
 check_cfunc(const rb_method_entry_t *me, VALUE (*func)())
@@ -101,8 +105,7 @@ typedef struct Event Event;
 typedef struct Trace Trace;
 typedef struct RJit  RJit;
 
-#define TRACERECORDER_CAPACITY (128)
-static TraceRecorder *TraceRecorderNew(RJit *jit, unsigned capacity);
+static TraceRecorder *TraceRecorderNew(RJit *jit);
 static void TraceRecorderDelete(TraceRecorder *Rec);
 
 typedef TraceExitStatus (*native_func_t)(rb_thread_t *th,
@@ -133,7 +136,7 @@ static int RJitModeIs(RJit *Jit, TraceMode mode)
 RJit *RJitInit()
 {
   RJit *Jit = (RJit *) malloc(sizeof(*Jit));
-  Jit->Rec = TraceRecorderNew(Jit, TRACERECORDER_CAPACITY);
+  Jit->Rec = TraceRecorderNew(Jit);
   RJitSetMode(Jit, TRACE_MODE_DEFAULT);
   Jit->CurrentTrace = NULL;
   hashmap_init(&Jit->Traces, 4);
@@ -170,8 +173,8 @@ void RJitGlobalDestruct()
 
 // stack map
 struct call_stack_struct {
-  int regstack_size;
-  int method_argc;
+  unsigned regstack_size;
+  unsigned method_argc;
 };
 
 typedef struct Stackmap {
@@ -209,6 +212,14 @@ static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
   trace->iseq   = iseq;
   hashmap_init(&trace->SideExit, 1);
   return trace;
+}
+
+static void TraceReset(Trace *trace)
+{
+  if (hashmap_size(&trace->SideExit) > 0) {
+    hashmap_dispose(&trace->SideExit, DeleteStackMap);
+    hashmap_init(&trace->SideExit, 1);
+  }
 }
 
 static void TraceFree(Trace *trace)
@@ -270,9 +281,12 @@ static Event *EventInit(Event *e, RJit *jit, rb_control_frame_t *cfp, VALUE *pc)
 
 static int isBackwardBranch(Event *e)
 {
-  rb_control_frame_t *reg_cfp = e->cfp;
-  OFFSET dst = (OFFSET) GET_OPERAND(1);
-  return dst < 0;
+  if(e->opcode == BIN(branchif)) {
+    rb_control_frame_t *reg_cfp = e->cfp;
+    OFFSET dst = (OFFSET) GET_OPERAND(1);
+    return dst < 0;
+  }
+  return 0;
 }
 
 // trace recorder
@@ -299,10 +313,9 @@ struct TraceRecorder {
 
 static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer);
 
-static TraceRecorder *TraceRecorderNew(RJit *jit, unsigned capacity)
+static TraceRecorder *TraceRecorderNew(RJit *jit)
 {
-  TraceRecorder *Rec = (TraceRecorder *)
-      malloc(sizeof(*Rec) + capacity * sizeof(VALUE*));
+  TraceRecorder *Rec = (TraceRecorder *) malloc(sizeof(*Rec));
   memset(Rec, 0, sizeof(*Rec));
   Rec->jit = jit;
   TraceRecorderClear(Rec, 0);
@@ -404,28 +417,33 @@ static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
 #undef BUFF_SIZE
 
 static void record_insn(RJit *jit, Event *e);
+static void dump_inst(rb_control_frame_t *reg_cfp, VALUE *reg_pc);
 static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc);
+static unsigned CountLIRInstSize(TraceRecorder *Rec);
+static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC);
+static int Emit_Exit(TraceRecorder *Rec, VALUEPtr Exit);
 
 static void TraceRecorderAppend(RJit *jit, TraceRecorder *Rec, Event *e)
 {
-  assert(Rec->LastInstId < TRACERECORDER_CAPACITY);
   if (Rec->EntryBlock == NULL) {
     Rec->EntryBlock = Rec->Block = CreateBlock(Rec, e->pc);
   }
+  dump_inst(e->cfp, e->pc);
   record_insn(jit, e);
 }
 
 static int TraceRecorderIsFull(TraceRecorder *Rec)
 {
-  return Rec->LastInstId == TRACERECORDER_CAPACITY;
+  return Rec->LastInstId == GWIR_MAX_TRACE_LENGTH;
 }
 
 static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)
 {
-  native_func_t compiled_code = NULL;
+  jit->CurrentTrace->Code = NULL;
   dump_lir(Rec);
-  compiled_code = TranslateToNativeCode(Rec);
-  jit->CurrentTrace->Code = compiled_code;
+  if (CountLIRInstSize(Rec) > GWIR_MIN_TRACE_LENGTH) {
+    jit->CurrentTrace->Code = TranslateToNativeCode(Rec);
+  }
   jit->CurrentTrace = NULL;
   TraceRecorderClear(Rec, 0);
 }
@@ -438,8 +456,11 @@ static void TraceRecorderAbort(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, 
             RSTRING_PTR(file),
             rb_iseq_line_no(iseq, reg_pc - iseq->iseq_encoded),
             trace_error_message[reason]);
+    TakeStackSnapshot(Rec, reg_pc);
+    Emit_Exit(Rec, reg_pc);
     SubmitToCompilation(Rec->jit, Rec);
   }
+  RJitSetMode(Rec->jit, TRACE_MODE_DEFAULT);
   global_rjit->CurrentTrace = NULL;
   TraceRecorderClear(Rec, 0);
 }
@@ -502,6 +523,7 @@ static int isTracableNativeCall(Event *e)
   /* check ClassA.new(argc, argv) */
   if (check_cfunc(ci->me,  rb_class_new_instance)) {
     if (ci->me->klass == rb_cClass) {
+      return 1;
     }
   }
 
@@ -562,6 +584,7 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
     switch (exit_status) {
       case TRACE_EXIT_SIDE_EXIT:
         trace = GetOrAddTrace(jit, th->cfp, exit_pc, trace);
+        TraceRecorderClear(jit->Rec, 1);
         RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
         break;
       case TRACE_EXIT_SUCCESS:
@@ -578,6 +601,7 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
     trace->ctr += 1;
     if (trace->ctr > HOT_TRACE_THRESHOLD) {
       RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
+      TraceReset(trace);
       TraceRecorderClear(jit->Rec, 1);
       TraceRecorderAppend(jit, jit->Rec, e);
     }

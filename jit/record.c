@@ -226,6 +226,7 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALU
   VALUE obj = TOPN(ci->argc);
 
   vm_search_method(ci, ci->recv = TOPN(ci->argc));
+  ci = CloneInlineCache(&Rec->CacheMng, ci);
 
   // check method type
   if(ci->me) {
@@ -921,6 +922,7 @@ static void record_opt_case_dispatch(TraceRecorder *Rec, rb_control_frame_t *reg
   else {\
     normal_dispatch:\
     vm_search_method(ci, recv);\
+    ci = CloneInlineCache(&Rec->CacheMng, ci);\
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);\
     Rval = EmitIR(InvokeMethod, ci, 2, params);\
   }\
@@ -953,6 +955,7 @@ static void record_opt_case_dispatch(TraceRecorder *Rec, rb_control_frame_t *reg
     CALL_INFO ci = (CALL_INFO) GET_OPERAND(1);\
     reg_t params[] = {Rrecv, Robj};\
     vm_search_method(ci, recv);\
+    ci = CloneInlineCache(&Rec->CacheMng, ci);\
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);\
     Rval = EmitIR(InvokeMethod, ci, 2, params);\
   }\
@@ -1052,6 +1055,7 @@ static void record_opt_ltlt(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VAL
   else {
 normal_dispatch:
     vm_search_method(ci, recv);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 2, params);
   }
@@ -1094,6 +1098,7 @@ static void record_opt_aref(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VAL
   else {
 normal_dispatch:
     vm_search_method(ci, recv);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 2, params);
   }
@@ -1139,6 +1144,7 @@ static void record_opt_aset(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VAL
   else {
 normal_dispatch:
     vm_search_method(ci, recv);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 3, params);
   }
@@ -1177,6 +1183,7 @@ static void record_opt_aset_with(TraceRecorder *Rec, rb_control_frame_t *reg_cfp
   else {
 normal_dispatch:
     vm_search_method(ci, recv);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 3, params);
   }
@@ -1213,6 +1220,7 @@ static void record_opt_aref_with(TraceRecorder *Rec, rb_control_frame_t *reg_cfp
   else {
 normal_dispatch:
     vm_search_method(ci, recv);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 2, params);
   }
@@ -1257,6 +1265,7 @@ static void _record_length(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALU
   else {
 normal_dispatch:
     vm_search_method(ci, recv);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 1, params);
   }
@@ -1310,6 +1319,7 @@ static void record_opt_empty_p(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, 
   else {
 normal_dispatch:
     vm_search_method(ci, recv);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
     EmitIR(GuardMethodCache, reg_pc, params[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 1, params);
   }
@@ -1364,6 +1374,7 @@ static void record_opt_not(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALU
 
   //extern VALUE rb_obj_not(VALUE obj);
   //vm_search_method(ci, recv);
+  //ci = CloneInlineCache(&Rec->CacheMng, ci);
 
   //EmitIR(GuardMethodCache, reg_pc, params[0], ci);
   //if (check_cfunc(ci->me, rb_obj_not)) {

@@ -12,6 +12,7 @@
 #define GWJIT_CONTEXT_H
 
 typedef enum trace_exit_staus {
+  TRACE_EXIT_ERROR   = -1,
   TRACE_EXIT_SUCCESS = 0,
   TRACE_EXIT_SIDE_EXIT
 } TraceExitStatus;

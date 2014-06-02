@@ -2,7 +2,7 @@
 
 source_dir = "."
 target_dir = "build"
-debug_mode = !false
+debug_mode =  false
 
 opt        = 3
 debug      = 0

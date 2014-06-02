@@ -298,6 +298,56 @@ static int isBackwardBranch(Event *e)
   return 0;
 }
 
+// List of entry of inline cache that jit generated code use
+typedef struct inline_cache_manager {
+  CALL_INFO *CallInfoList;
+  int CallInfoListSize;
+  int CallInfoListCapacity;
+  int CallInfoLastFreezed;
+} InlineCacheManager;
+
+static CALL_INFO CloneInlineCache(InlineCacheManager *icm, CALL_INFO ci)
+{
+  CALL_INFO newci = (CALL_INFO) malloc(sizeof(*newci));
+  memcpy(newci, ci, sizeof(*newci));
+
+  if (icm->CallInfoListSize == icm->CallInfoListCapacity) {
+    unsigned newsize = icm->CallInfoListCapacity * 2;
+    icm->CallInfoList = (CALL_INFO *)
+        realloc(icm->CallInfoList, sizeof(CALL_INFO) * newsize);
+    icm->CallInfoListCapacity = newsize;
+  }
+  icm->CallInfoList[icm->CallInfoListSize++] = newci;
+  return newci;
+}
+
+static void FreezeInlineCache(InlineCacheManager *icm)
+{
+  icm->CallInfoLastFreezed = icm->CallInfoListSize;
+}
+
+static void CancelCallInfo(InlineCacheManager *icm)
+{
+  int i;
+  for (i = icm->CallInfoLastFreezed; i < icm->CallInfoListSize; i++) {
+    free(icm->CallInfoList[i]);
+  }
+}
+
+static void InlineCacheManagerInit(InlineCacheManager *icm)
+{
+  icm->CallInfoList = (CALL_INFO *) malloc(sizeof(CALL_INFO) * 1);
+  icm->CallInfoListSize     = 0;
+  icm->CallInfoListCapacity = 1;
+  icm->CallInfoLastFreezed  = 0;
+}
+
+static void InlineCacheManagerDelete(InlineCacheManager *icm)
+{
+  icm->CallInfoLastFreezed = 0;
+  CancelCallInfo(icm);
+}
+
 // trace recorder
 struct TraceRecorder {
   RJit *jit;
@@ -321,6 +371,8 @@ struct TraceRecorder {
 
   int LastInstId;
   int CallDepth;
+
+  InlineCacheManager CacheMng;
 };
 
 static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer);
@@ -331,12 +383,14 @@ static TraceRecorder *TraceRecorderNew(RJit *jit)
   memset(Rec, 0, sizeof(*Rec));
   Rec->jit = jit;
   TraceRecorderClear(Rec, 0);
+  InlineCacheManagerInit(&Rec->CacheMng);
   return Rec;
 }
 
 static void TraceRecorderDelete(TraceRecorder *Rec)
 {
   TraceRecorderClear(Rec, 0);
+  InlineCacheManagerDelete(&Rec->CacheMng);
   free(Rec);
 }
 
@@ -614,6 +668,9 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
         RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
         break;
       case TRACE_EXIT_SUCCESS:
+        break;
+      case TRACE_EXIT_ERROR:
+        assert(0 && "unreachable");
         break;
     }
     return exit_pc;

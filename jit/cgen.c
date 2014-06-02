@@ -260,7 +260,6 @@ static int construct_pch_path(char *buf, size_t bufsize)
 
 static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
 {
-
   buffer_init(&gen->buf);
   gen->mode = mode;
   gen->hdr  = NULL;
@@ -290,6 +289,8 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
   }
   gen->path = path;
 }
+
+static void DeleteCallSiteEntry(void *ptr) {}
 
 static void cgen_freeze(CGen *gen, int id)
 {
@@ -413,9 +414,21 @@ static void PrepareSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBB
   long j = 1;
   hashmap_iterator_t itr = {0, 0};
   while(hashmap_next(&TraceRecorderGetTrace(Rec)->SideExit, &itr)) {
-    VALUE *pc = itr.entry->k;
+    VALUE *pc       = itr.entry->k;
+    StackMap *stack = GetStackMap(Rec, pc);
     hashmap_set(SideExitBBs, pc, (struct Trace *)(j << 1));
-    cgen_printf(gen, "VALUE *exit_pc_%ld = (VALUE *) %p;\n", j, pc);
+    cgen_printf(gen,
+                "static TraceExitStatus gwjit_side_exit_%ld("
+                "rb_thread_t *th, "
+                "rb_control_frame_t *reg_cfp, "
+                "VALUE **exit_pc)\n"
+                "{\n"
+                "  VALUE *pc = (VALUE *) %p;\n"
+                "  SET_PC(pc);\n"
+                "  *exit_pc = pc;\n"
+                "  return %s;\n"
+                "}\n",
+                j, pc, TraceStatusToStr(stack->flag));
     j += 1;
   }
 }
@@ -458,10 +471,8 @@ static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
 
     cgen_printf(gen,
                 "SET_SP(GET_SP() + %d);\n"
-                "SET_PC(exit_pc_%ld);\n"
-                "*exit_pc = exit_pc_%ld;\n"
-                "return %s;\n",
-                j, BlockId, BlockId, TraceStatusToStr(stack->flag));
+                "return gwjit_side_exit_%ld(th, reg_cfp, exit_pc);\n",
+                j, BlockId);
   }
 }
 
@@ -523,7 +534,18 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, int
               "  (void) make_no_method_exception;\n"
               "  (void) jit_vm_call_iseq_setup_normal;\n"
               "  (void) jit_vm_yield_setup_block_args;\n"
-              "}\n"
+              "}\n",
+#if GWJIT_DUMP_COMPILE_LOG > 0
+              RSTRING_PTR(file),
+              rb_iseq_line_no(iseq,
+                              TraceRecorderGetTrace(Rec)->StartPC -
+                              iseq->iseq_encoded),
+#endif
+              fid);
+
+  PrepareSideExit(Rec, gen, SideExitBBs);
+
+  cgen_printf(gen,
               "TraceExitStatus gwjit_%d(rb_thread_t *th,\n"
               "    rb_control_frame_t *reg_cfp,\n"
               "    VALUE *reg_pc,\n"
@@ -531,15 +553,7 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, int
               "{\n"
               "  VALUE *original_sp = GET_SP();\n"
               "  rb_control_frame_t *original_cfp = reg_cfp;\n",
-#if GWJIT_DUMP_COMPILE_LOG > 0
-              RSTRING_PTR(file),
-              rb_iseq_line_no(iseq,
-                              TraceRecorderGetTrace(Rec)->StartPC -
-                              iseq->iseq_encoded),
-#endif
-              fid, fid);
-
-  PrepareSideExit(Rec, gen, SideExitBBs);
+              fid);
 
   while(block != NULL) {
     unsigned i = 0;

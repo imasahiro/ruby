@@ -29,8 +29,15 @@
 #define GWIR_TRACE_INIT_SIZE  16   /* initial size of trace */
 #define GWIR_RESERVED_REGSTACK_SIZE 8
 
+#define GWJIT_CODEGEN_DEBUG  0
+
+#if GWJIT_CODEGEN_DEBUG > 0
 #define GWIT_CGEN_OPT_LEVEL "0"
 #define GWIT_CGEN_DBG_LEVEL "3"
+#else
+#define GWIT_CGEN_OPT_LEVEL "3"
+#define GWIT_CGEN_DBG_LEVEL "0"
+#endif
 
 /* Initial buffer size of lir memory allocator */
 #define LIR_COMPILE_DATA_BUFF_SIZE (512)

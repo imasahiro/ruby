@@ -27,9 +27,10 @@
 #define GWIR_MIN_TRACE_LENGTH  8   /* min length of instructions gwjit compile */
 #define GWIR_MAX_TRACE_LENGTH 1024 /* max length of instructions gwjit compile */
 #define GWIR_TRACE_INIT_SIZE  16   /* initial size of trace */
+#define GWIR_RESERVED_REGSTACK_SIZE 8
 
-#define GWIT_CGEN_OPT_LEVEL "3"
-#define GWIT_CGEN_DBG_LEVEL "0"
+#define GWIT_CGEN_OPT_LEVEL "0"
+#define GWIT_CGEN_DBG_LEVEL "3"
 
 /* Initial buffer size of lir memory allocator */
 #define LIR_COMPILE_DATA_BUFF_SIZE (512)

@@ -124,7 +124,8 @@ EnvStore :use (Level:int, Index:int, Val:reg_t)
 EnvLoad  :def (Level:int, Index:int)
 
 # stack instruction
-StackPop :def ()
+StackPop    :def ()
+StackAdjust :use (argc:int, argv:RegPtr)
 
 # invoke instruction
 InvokeMethod :def :use (ci:CALL_INFO, argc:int, argv:reg_t[])

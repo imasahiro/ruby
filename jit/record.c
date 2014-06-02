@@ -1559,6 +1559,5 @@ static void record_insn(RJit *jit, Event *e)
   }
   if (RJitModeIs(jit, TRACE_MODE_RECORD)) {
     TraceUpdateLastInst(TraceRecorderGetTrace(Rec), reg_pc);
-    record_stack_bottom(Rec, opcode, reg_pc);
   }
 }

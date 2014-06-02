@@ -11,7 +11,8 @@
 #define FMT(T) FMT_##T
 #define FMT_int      "%d"
 #define FMT_long     "%ld"
-#define FMT_reg_t    "%04lu"
+#define FMT_reg_t    "%04ld"
+#define FMT_RegPtr   "%04ld"
 #define FMT_ID       "%04d"
 #define FMT_VALUE    "0x%lx"
 #define FMT_VALUEPtr "%p"
@@ -26,6 +27,7 @@
 #define DATA_int(V)           (V)
 #define DATA_long(V)          (V)
 #define DATA_reg_t(V)         (V)
+#define DATA_RegPtr(V)        (*(V))
 #define DATA_VALUE(V)         (V)
 #define DATA_VALUEPtr(V)      (V)
 #define DATA_voidPtr(V)       (V)
@@ -42,7 +44,13 @@ static long lir_getid(lir_compile_data_header_t *ir)
 
 static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc)
 {
-  BasicBlock *bb = (BasicBlock *) lir_alloc(Rec, sizeof(BasicBlock));
+  BasicBlock *bb = NULL;
+
+  if (!RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
+    return bb;
+  }
+
+  bb = (BasicBlock *) lir_alloc(Rec, sizeof(BasicBlock));
   //fprintf(stderr, "newblock=(%p, %p)\n", bb, pc);
   bb->base.flag = 0;
   bb->base.next = NULL;
@@ -177,10 +185,26 @@ static int lir_inst_define_value(int opcode)
 static void dump_lir_inst(lir_compile_data_header_t *Inst);
 #endif /* DUMP_LIR > 0*/
 
+static lir_compile_data_header_t *CreateInst(TraceRecorder *Rec, lir_compile_data_header_t *inst, size_t inst_size)
+{
+  lir_compile_data_header_t *buf = lir_alloc(Rec, inst_size);
+  int newid = buf->id;
+  memcpy(buf, inst, inst_size);
+  buf->id = newid;
+  assert(buf->id != 0);
+  return buf;
+}
+
 static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst, size_t inst_size)
 {
+  lir_compile_data_header_t *buf;
+  int opt;
   BasicBlock *bb = Rec->Block;
-  int opt = peephole(Rec, inst);
+  if (!RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
+    return -1;
+  }
+
+  opt = peephole(Rec, inst);
   if (opt != 0) {
     return opt;
   }
@@ -193,17 +217,11 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst, size_t i
                     sizeof(lir_compile_data_header_t *) * newsize);
     bb->capacity = newsize;
   }
-  lir_compile_data_header_t *buf = lir_alloc(Rec, inst_size);
-  int newid = buf->id;
-  memcpy(buf, inst, inst_size);
-  buf->id = newid;
-  assert(buf->id != 0);
+
+  buf = CreateInst(Rec, inst, inst_size);
   bb->Insts[bb->size] = buf;
   bb->size += 1;
-  //#if DUMP_LIR > 0
-  //  dump_lir_inst(buf);
-  //#endif
-  return newid;
+  return buf->id;
 }
 
 #if DUMP_LIR > 0
@@ -230,12 +248,13 @@ static void dump_lir_block(BasicBlock *block)
 
 static void dump_side_exit(TraceRecorder *Rec)
 {
-  unsigned i;
+  int i;
   hashmap_iterator_t itr = {0, 0};
   while(hashmap_next(&TraceRecorderGetTrace(Rec)->SideExit, &itr)) {
     VALUE *pc = itr.entry->k;
     StackMap *stack = GetStackMap(Rec, pc);
-    fprintf(stderr, "side exit: pc=%p: %s ", pc, TraceStatusToStr(stack->flag));
+    fprintf(stderr, "side exit(%d): pc=%p: %s ",
+            stack->size, pc, TraceStatusToStr(stack->flag));
     for (i = 0; i < stack->size; i++) {
       fprintf(stderr, "  [%d] = %04ld;", i, stack->regs[i]);
     }

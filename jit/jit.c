@@ -32,6 +32,7 @@ typedef long reg_t;
 
 typedef VALUE *VALUEPtr;
 typedef void  *voidPtr;
+typedef reg_t *RegPtr;
 
 struct Event;
 typedef struct TraceRecorder TraceRecorder;
@@ -41,7 +42,7 @@ static void dump_lir(TraceRecorder *builder);
 typedef struct lir_compile_data_header {
   unsigned opcode:10;
   unsigned flag  :22;
-  unsigned id;
+  int id;
   struct lir_compile_data_header *next;
 } lir_compile_data_header_t;
 
@@ -89,6 +90,9 @@ typedef enum trace_error_status {
   TRACE_ERROR_THROW,
   TRACE_ERROR_UNSUPPORT_OP,
   TRACE_ERROR_LEAVE,
+  TRACE_ERROR_REGSTACK_UNDERFLOW,
+  TRACE_ERROR_ALREADY_RECORDED,
+  TRACE_ERROR_BUFFER_FULL,
   TRACE_ERROR_END
 } TraceErrorStatus;
 
@@ -98,6 +102,9 @@ static const char *trace_error_message[] = {
   "throw exception",
   "not supported bytecode",
   "this trace return into native method",
+  "register stack underflow",
+  "this instruction is already recorded on trace"
+  "trace buffer is full"
   ""
 };
 
@@ -178,8 +185,8 @@ struct call_stack_struct {
 };
 
 typedef struct Stackmap {
-  unsigned size;
-  unsigned flag;
+  int size;
+  int flag;
   reg_t regs[0];
 } StackMap;
 
@@ -261,6 +268,7 @@ struct Event {
   VALUE *pc;
   Trace *trace;
   int opcode;
+  TraceErrorStatus reason;
 };
 
 static int get_opcode(rb_control_frame_t *reg_cfp, VALUE *reg_pc)
@@ -276,6 +284,7 @@ static Event *EventInit(Event *e, RJit *jit, rb_control_frame_t *cfp, VALUE *pc)
   e->pc  = pc;
   e->trace = jit->CurrentTrace;
   e->opcode = get_opcode(e->cfp, e->pc);
+  e->reason = TRACE_OK;
   return e;
 }
 
@@ -292,22 +301,25 @@ static int isBackwardBranch(Event *e)
 // trace recorder
 struct TraceRecorder {
   RJit *jit;
+  Event *CurrentEvent;
+
   BasicBlock *Block;
   BasicBlock *EntryBlock;
+
   lir_compile_data_header_t *buffer_head;
   lir_compile_data_header_t *buffer_root;
   char *buffer_current;
 
   reg_t *RegStack;
-  unsigned RegStackSize;
-  unsigned RegStackCapacity;
+  int RegStackBottom;
+  int RegStackSize;
+  int RegStackCapacity;
 
   struct call_stack_struct *CallStack;
-  unsigned CallStackSize;
-  unsigned CallStackCapacity;
+  int CallStackSize;
+  int CallStackCapacity;
 
   int LastInstId;
-  int StackBottom;
   int CallDepth;
 };
 
@@ -393,12 +405,15 @@ static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
   Rec->buffer_root    = Rec->buffer_head;
   Rec->buffer_current = (char *) (Rec->buffer_head + 1);
 
+  Rec->RegStackBottom   = 0;
   Rec->RegStackSize     = 0;
   Rec->RegStackCapacity = 0;
   Rec->RegStack = NULL;
   if (AllocBuffer) {
-    Rec->RegStackCapacity = 1;
-    Rec->RegStack = (reg_t *) lir_alloc(Rec, sizeof(reg_t) * 1);
+    reg_t *RegStack;
+    Rec->RegStackCapacity = GWIR_RESERVED_REGSTACK_SIZE + 1;
+    RegStack = (reg_t *) lir_alloc(Rec, sizeof(reg_t) * Rec->RegStackCapacity);
+    Rec->RegStack = RegStack + GWIR_RESERVED_REGSTACK_SIZE;
   }
 
   Rec->CallStackSize     = 0;
@@ -410,7 +425,6 @@ static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
         lir_alloc(Rec, sizeof(struct call_stack_struct) * 1);
   }
 
-  Rec->StackBottom = 0;
   Rec->CallDepth    = 0;
 }
 #undef BUFF_POS
@@ -422,11 +436,17 @@ static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc);
 static unsigned CountLIRInstSize(TraceRecorder *Rec);
 static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC);
 static int Emit_Exit(TraceRecorder *Rec, VALUEPtr Exit);
+static int Emit_Jump(TraceRecorder *Rec, VALUEPtr Exit);
+static int Emit_StackAdjust(TraceRecorder *Rec, int argc, RegPtr argv);
 
 static void TraceRecorderAppend(RJit *jit, TraceRecorder *Rec, Event *e)
 {
+  Rec->CurrentEvent = e;
   if (Rec->EntryBlock == NULL) {
-    Rec->EntryBlock = Rec->Block = CreateBlock(Rec, e->pc);
+    Rec->EntryBlock = CreateBlock(Rec, NULL);
+    Emit_StackAdjust(Rec, 0, NULL);
+    Emit_Jump(Rec, e->pc);
+    Rec->Block = CreateBlock(Rec, e->pc);
   }
   dump_inst(e->cfp, e->pc);
   record_insn(jit, e);
@@ -458,7 +478,9 @@ static void TraceRecorderAbort(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, 
             trace_error_message[reason]);
     TakeStackSnapshot(Rec, reg_pc);
     Emit_Exit(Rec, reg_pc);
-    SubmitToCompilation(Rec->jit, Rec);
+    if (reason != TRACE_ERROR_REGSTACK_UNDERFLOW) {
+      SubmitToCompilation(Rec->jit, Rec);
+    }
   }
   RJitSetMode(Rec->jit, TRACE_MODE_DEFAULT);
   global_rjit->CurrentTrace = NULL;
@@ -487,7 +509,7 @@ static int AlreadyRecordedOnTrace(RJit *jit, Event *e) {
     }
   }
   // this instruction is backward branch to a trace header.
-  if (e->trace->StartPC == e->pc) {
+  else if (e->trace->StartPC == e->pc) {
     RJitSetMode(jit, TRACE_MODE_RECORD | TRACE_MODE_EMIT_BACKWARD_BRANCH);
     TraceRecorderAppend(jit, jit->Rec, e);
     return 1;
@@ -549,15 +571,19 @@ static int isIrregularEvent(Event *e)
 static int ShouldEndTrace(Event *e, TraceRecorder *Rec)
 {
   if (AlreadyRecordedOnTrace(Rec->jit, e)) {
+    e->reason = TRACE_ERROR_ALREADY_RECORDED;
     return 1;
   }
   else if (TraceRecorderIsFull(Rec)) {
+    e->reason = TRACE_ERROR_BUFFER_FULL;
     return 1;
   }
   else if (!isTracableNativeCall(e)) {
+    e->reason = TRACE_ERROR_NATIVE_METHOD;
     return 1;
   }
   else if (isIrregularEvent(e)) {
+    e->reason = TRACE_ERROR_THROW;
     return 1;
   }
   return 0;

@@ -91,7 +91,7 @@ open(ARGV[0]) { |file|
             end
 
             ir.arg.each{|e|
-                if e.variadic
+                if e.variadic || e.type == "RegPtr"
                     puts "  int i;"
                     puts "  for(i = 0; i < argc; i++) {"
                     puts "    ir->#{e.name}[i] = #{e.name}[i];\n"
@@ -119,10 +119,14 @@ open(ARGV[0]) { |file|
                 t = e.type
                 n = e.name
                 puts "  fprintf(stderr, \" #{n}:\");\n"
-                if e.variadic
+                if e.variadic || e.type == "RegPtr"
                     puts "  int i_#{n};"
                     puts "  for(i_#{n} = 0; i_#{n} < ir->argc; i_#{n}++) {"
-                    puts "    #{t} val = ir->#{n}[i_#{n}];"
+                    if e.type == "RegPtr"
+                        puts "    #{t} val = &ir->#{n}[i_#{n}];"
+                    else
+                        puts "    #{t} val = ir->#{n}[i_#{n}];"
+                    end
                     puts "    fprintf(stderr, \" \" FMT(#{t}), DATA(#{t}, val));\n"
                     puts "  }"
                 else

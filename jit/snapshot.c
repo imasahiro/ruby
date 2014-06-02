@@ -15,7 +15,16 @@ static StackMap *GetStackMap(TraceRecorder *Rec, VALUE *pc)
 
 static void AddStackMap(TraceRecorder *Rec, VALUE *pc, StackMap *map)
 {
-  hashmap_set(&TraceRecorderGetTrace(Rec)->SideExit, pc, (struct Trace *) map);
+  if (RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
+    hashmap_set(&TraceRecorderGetTrace(Rec)->SideExit, pc, (struct Trace *) map);
+  }
+}
+
+static void TraceRecorderRecordBottom(TraceRecorder *Rec, int current)
+{
+  if (current < Rec->RegStackBottom) {
+    Rec->RegStackBottom = current;
+  }
 }
 
 static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
@@ -27,9 +36,9 @@ static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
           Rec->RegStackSize
          );
 #endif
-  int begin = Rec->StackBottom;
+  int begin = Rec->RegStackBottom;
   int end   = Rec->RegStackSize;
-  int i, n = end - begin;
+  int i, j, n = end - begin;
   StackMap *map;
   if ((map = GetStackMap(Rec, PC))) {
     DeleteStackMap(map);
@@ -41,49 +50,79 @@ static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
   if (RJitModeIs(Rec->jit, TRACE_MODE_EMIT_BACKWARD_BRANCH)) {
     map->flag = TRACE_EXIT_SUCCESS;
   }
-  for (i = 0; i < n; i++) {
+
+  for (i = begin, j = 0; i < end; i++) {
     reg_t reg = Rec->RegStack[i];
 #if DUMP_STACK_MAP > 0
     fprintf(stderr, "\t\t[%d] reg=%ld\n", i, reg);
 #endif
-    map->regs[i] = reg;
+    map->regs[j++] = reg;
   }
   AddStackMap(Rec, PC, map);
 }
 
-static void record_stack_bottom(TraceRecorder *Rec, int opcode, VALUE *pc)
+static reg_t AdjustStack(TraceRecorder *Rec)
 {
-  //FIXME
-  // typeof concatstrings's operand is rb_num_t not Fixnum.
-  // but insn_stack_increase() assume typeof the operand is Fixnum
-#if 0
-  int depth = insn_stack_increase(0, opcode, pc + 1);
-  Rec->stack_top += depth;
-  if (Rec->stack_top < Rec->StackBottom) {
-    Rec->StackBottom = Rec->stack_top;
+  reg_t Reg;
+  IStackAdjust *sa = (IStackAdjust *) Rec->EntryBlock->Insts[0];
+  BasicBlock *PrevBB = Rec->Block;
+  Rec->Block = Rec->EntryBlock;
+  Reg = Emit_StackPop(Rec);
+  assert(sa->base.opcode == OPCODE_IStackAdjust);
+
+  /*
+   *      before     |   after
+   * L0: StackAdjust | StackAdjust
+   * L1: StackPop(1) | StackPop(1)
+   * L2: StackPop(0) | StackPop(0)
+   * L3: Jump Block  | StackPop(2)
+   * L4: StackPop(1) | Jump Block
+   */
+  int i, jumpIdx = Rec->EntryBlock->size - 1;
+  lir_compile_data_header_t **Insts = Rec->EntryBlock->Insts;
+  lir_compile_data_header_t *last, *jump;
+  jump = Insts[jumpIdx - 1];
+  last = Insts[jumpIdx];
+  Insts[jumpIdx - 1] = last;
+  Insts[jumpIdx]     = jump;
+  Rec->Block = PrevBB;
+  assert(Rec->EntryBlock);
+  /*
+   *      before     |   after
+   * L0: StackAdjust | StackAdjust
+   * L1: StackPop(1) | StackPop(2)
+   * L2: StackPop(0) | StackPop(1)  <- jumpIdx - 2
+   * L3: StackPop(2) | StackPop(0)  <- jumpIdx - 1
+   * L4: Jump Block  | Jump Block   <- jumpIdx
+   */
+  if (jumpIdx > 2) {
+    // Insts.insert(1, last)
+    lir_compile_data_header_t *prev = Insts[1];
+    for (i = 2; i < jumpIdx; i++) {
+      lir_compile_data_header_t *tmp = Insts[i];
+      Insts[i] = prev;
+      prev     = tmp;
+    }
+    Insts[1] = last;
   }
-#if DUMP_STACK_MAP > 1
-  fprintf(stderr, "\t\tr:top=%d bottom=%d, %d\n",
-          Rec->stack_top, Rec->StackBottom,
-          Rec->RegStackSize
-         );
-#endif
-#endif
+  return Reg;
 }
 
 static void PushRegister(TraceRecorder *Rec, reg_t Reg)
 {
-  if (Rec->RegStackSize == Rec->RegStackCapacity) {
+  if (Rec->RegStackSize + GWIR_RESERVED_REGSTACK_SIZE == Rec->RegStackCapacity) {
     unsigned newsize = Rec->RegStackCapacity * 2;
-    Rec->RegStack =
-        (reg_t *) lir_realloc(Rec, Rec->RegStack,
+    reg_t *RegStack =
+        (reg_t *) lir_realloc(Rec, Rec->RegStack - GWIR_RESERVED_REGSTACK_SIZE,
                               sizeof(reg_t) * Rec->RegStackCapacity,
                               sizeof(reg_t) * newsize);
+    Rec->RegStack = RegStack + GWIR_RESERVED_REGSTACK_SIZE;
     Rec->RegStackCapacity = newsize;
   }
   assert(Reg >= 0);
   Rec->RegStack[Rec->RegStackSize] = Reg;
   Rec->RegStackSize += 1;
+  TraceRecorderRecordBottom(Rec, Rec->RegStackSize);
 #if DUMP_STACK_MAP > 1
   fprintf(stderr, "push: %d %ld\n", Rec->RegStackSize, Reg);
 #endif
@@ -92,39 +131,56 @@ static void PushRegister(TraceRecorder *Rec, reg_t Reg)
 static reg_t PopRegister(TraceRecorder *Rec)
 {
   reg_t Reg;
-  if (Rec->RegStackSize == 0) {
-    PushRegister(Rec, Emit_StackPop(Rec));
+  if (Rec->RegStackSize == -1 * GWIR_RESERVED_REGSTACK_SIZE) {
+    Event *e = Rec->CurrentEvent;
+    TraceRecorderAbort(Rec, e->cfp, e->pc, TRACE_ERROR_REGSTACK_UNDERFLOW);
   }
-  if(Rec->RegStackSize > 0) {
-    Rec->RegStackSize -= 1;
-    Reg = Rec->RegStack[Rec->RegStackSize];
-  }
-  else {
-    Reg = Rec->StackBottom;
+  Rec->RegStackSize -= 1;
+  TraceRecorderRecordBottom(Rec, Rec->RegStackSize);
+  Reg = Rec->RegStack[Rec->RegStackSize];
+  if(Reg <= 0) {
+    Reg = AdjustStack(Rec);
   }
 #if DUMP_STACK_MAP > 1
   fprintf(stderr, "pop : %d %ld\n", Rec->RegStackSize, Reg);
+  assert(Reg != 0);
 #endif
   return Reg;
 }
 
 static reg_t TopRegister(TraceRecorder *Rec, long n)
 {
-  assert(Rec->RegStackSize > n && n >= 0);
-  reg_t Reg = Rec->RegStack[Rec->RegStackSize - n - 1];
+  long i, idx = Rec->RegStackSize - n - 1;
+  assert(idx < Rec->RegStackSize &&
+         idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
+  reg_t Reg = Rec->RegStack[idx];
+  TraceRecorderRecordBottom(Rec, idx);
+  if (Reg == 0 && idx < 0) {
+    for (i = idx; i < 0; i++) {
+      if (Rec->RegStack[i] == 0) {
+        Rec->RegStack[i] = AdjustStack(Rec);
+      }
+    }
+    Reg = Rec->RegStack[idx];
+  }
 #if DUMP_STACK_MAP > 1
-  fprintf(stderr, "top : %ld %ld\n", n, Reg);
+  fprintf(stderr, "top : %ld %ld\n", idx, Reg);
 #endif
+  assert(Reg != 0);
   return Reg;
 }
 
 static void SetRegister(TraceRecorder *Rec, long n, reg_t Reg)
 {
-  assert(Rec->RegStackSize > n && n >= 0);
+  long idx = Rec->RegStackSize - n - 1;
+  assert(idx < Rec->RegStackSize &&
+         idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
+  TraceRecorderRecordBottom(Rec, idx);
 #if DUMP_STACK_MAP > 1
-  fprintf(stderr, "set : %ld %ld\n", Rec->RegStackSize - n - 1, Reg);
+  fprintf(stderr, "set : %ld %ld\n", idx, Reg);
 #endif
-  Rec->RegStack[Rec->RegStackSize - n - 1] = Reg;
+  assert(Reg != 0);
+  Rec->RegStack[idx] = Reg;
 }
 
 // call stack

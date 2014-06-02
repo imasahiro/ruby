@@ -148,9 +148,9 @@ static int buffer_printf(Buffer *buf, const char *fmt, va_list ap)
 
 static uint64_t getTimeMilliSecond(void)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000 + tv.tv_usec / 1000;
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
 
 static uint64_t timer = 0;
@@ -540,7 +540,6 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, int
               fid, fid);
 
   PrepareSideExit(Rec, gen, SideExitBBs);
-  cgen_printf(gen, "VALUE v0 = 0; (void) v0;\n");
 
   while(block != NULL) {
     unsigned i = 0;
@@ -1410,6 +1409,12 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
       }
       break;
     }
+    case OPCODE_IStackAdjust : {
+      cgen_printf(gen,
+                  "  // v%ld;\n", Id);
+      break;
+    }
+
     case OPCODE_IStackPop : {
       cgen_printf(gen,
                   "  v%ld = *POP();\n"

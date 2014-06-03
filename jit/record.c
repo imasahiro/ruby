@@ -985,6 +985,7 @@ static void record_opt_not(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALU
 
 static void record_opt_regexpmatch1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
+  TakeStackSnapshot(Rec, reg_pc);
   VALUE obj = TOPN(0);
   VALUE r   = GET_OPERAND(1);
   VALUE params[] = {obj, r};
@@ -1001,6 +1002,7 @@ static void record_opt_regexpmatch1(TraceRecorder *Rec, rb_control_frame_t *reg_
 
 static void record_opt_regexpmatch2(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
+  TakeStackSnapshot(Rec, reg_pc);
   VALUE obj2 = TOPN(1);
   VALUE obj1 = TOPN(0);
   reg_t Robj1 = _POP();

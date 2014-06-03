@@ -790,8 +790,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
     }
     case OPCODE_IExit : {
       IExit *ir = (IExit *) Inst;
-      BasicBlock *BB = FindBasicBlockByPC(Rec, ir->Exit);
-      cgen_printf(gen, "goto L_exit%d;\n", BB->base.id);
+      long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
+      cgen_printf(gen, "goto L_exit%ld;\n", ExitBlockId);
       break;
     }
     case OPCODE_IFixnumAdd : {

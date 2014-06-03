@@ -521,6 +521,7 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, int
 #if GWJIT_DUMP_COMPILE_LOG > 0
               "// This code is translated from file=%s line=%d\n"
 #endif
+              "#define BLOCK_LABEL(label) L_##label:;(void)&&L_##label;\n"
               "const gwjit_context_t *jit_context = NULL;\n"
               "void init_gwjit_%d(const gwjit_context_t *context) {\n"
               "  jit_context = context;\n"
@@ -564,7 +565,7 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs, int
   block = Rec->EntryBlock;
   while(block != NULL) {
     unsigned i = 0;
-    cgen_printf(gen, "L_%d:;\n", block->base.id);
+    cgen_printf(gen, "BLOCK_LABEL(%d);\n", block->base.id);
     //cgen_printf(gen, "fprintf(stderr, \"block%d\\n\");\n", block->base.id);
     for (i = 0; i < block->size; i++) {
       lir_compile_data_header_t *Inst = block->Insts[i];

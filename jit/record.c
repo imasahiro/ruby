@@ -161,17 +161,23 @@ static void EmitSpecialInst0(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci, int op
   _PUSH(Rval);
 }
 
+static void PrepareInstructionArgument(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, int argc, VALUE *params, reg_t *regs)
+{
+  int i;
+  for (i = 0; i < argc + 1; i++) {
+    params[i] = TOPN(argc - i);
+    regs[argc - i] = _POP();
+  }
+}
+
 static void EmitSpecialInst1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, int opcode)
 {
   TakeStackSnapshot(Rec, reg_pc);
   CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
-  int i, argc = ci->argc + 1;
-  reg_t regs[argc];
-  VALUE params[argc];
-  for (i = 0; i < argc; i++) {
-    params[i] = TOPN(ci->argc - i);
-    regs[ci->argc - i] = _POP();
-  }
+  int i;
+  reg_t regs[ci->argc + 1];
+  VALUE params[ci->argc + 1];
+  PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
   EmitSpecialInst0(Rec, reg_pc, ci, opcode, params, regs);
 }
 
@@ -214,20 +220,16 @@ static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VAL
 
 static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci, rb_block_t *block, reg_t Rblock, int opcode)
 {
-  int i, argc = ci->argc + 1/*recv*/;
-  reg_t regs[argc];
-  VALUE params[argc];
-
-  for (i = 0; i < argc; i++) {
-    regs[i]   = _TOPN(ci->argc - i);
-    params[i] = TOPN(ci->argc - i);
-  }
+  reg_t regs[ci->argc + 1];
+  VALUE params[ci->argc + 1];
 
   vm_search_method(ci, ci->recv = TOPN(ci->argc));
+  PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
   ci = CloneInlineCache(&Rec->CacheMng, ci);
 
   reg_t Rval = -1;
   if ((Rval = EmitSpecialInst(Rec, reg_pc, ci, opcode, params, regs)) != -1) {
+    _PUSH(Rval);
     return;
   }
 

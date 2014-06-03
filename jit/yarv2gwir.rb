@@ -188,6 +188,8 @@ class Type < Rule
             s  = "(FLONUM_P(#{p}) && (is_flonum#{val} = 1)) ||"
             s += "((!SPECIAL_CONST_P(#{p}) && RBASIC_CLASS(#{p}) == rb_cFloat))"
             return s;
+        elsif @type == :Object
+            return "RB_TYPE_P(#{p}, T_OBJECT)"
         elsif @type == :_
             return "1/*typeof #{p} is Any*/"
         else

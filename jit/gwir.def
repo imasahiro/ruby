@@ -74,12 +74,12 @@ MathLog2  :def :use (Recv:reg_t)
 # string operator
 StringLength :def :use (Recv:reg_t)
 StringEmptyP :def :use (Recv:reg_t)
-StringConcat :def :use (Recv:reg_t)
+StringConcat :def :use (LHS:reg_t, RHS:reg_t)
 
 # array operator
 ArrayLength :def :use (Recv:reg_t)
 ArrayEmptyP :def :use (Recv:reg_t)
-ArrayConcat :def :use (Recv:reg_t)
+ArrayConcat :def :use (LHS:reg_t, RHS:reg_t)
 ArrayGet    :def :use (Recv:reg_t, Index:reg_t)
 ArraySet    :def :use (Recv:reg_t, Index:reg_t, Val:reg_t)
 

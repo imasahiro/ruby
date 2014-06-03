@@ -148,9 +148,9 @@ static reg_t PopRegister(TraceRecorder *Rec)
   return Reg;
 }
 
-static reg_t TopRegister(TraceRecorder *Rec, long n)
+static reg_t TopRegister(TraceRecorder *Rec, int n)
 {
-  long i, idx = Rec->RegStackSize - n - 1;
+  int i, idx = Rec->RegStackSize - n - 1;
   assert(idx < Rec->RegStackSize &&
          idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
   reg_t Reg = Rec->RegStack[idx];
@@ -170,9 +170,9 @@ static reg_t TopRegister(TraceRecorder *Rec, long n)
   return Reg;
 }
 
-static void SetRegister(TraceRecorder *Rec, long n, reg_t Reg)
+static void SetRegister(TraceRecorder *Rec, int n, reg_t Reg)
 {
-  long idx = Rec->RegStackSize - n - 1;
+  int idx = Rec->RegStackSize - n - 1;
   assert(idx < Rec->RegStackSize &&
          idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
   TraceRecorderRecordBottom(Rec, idx);
@@ -186,7 +186,7 @@ static void SetRegister(TraceRecorder *Rec, long n, reg_t Reg)
 // call stack
 static void PopCallStack(TraceRecorder *Rec)
 {
-  unsigned i;
+  int i;
   struct call_stack_struct *cs;
 
   assert(Rec->CallStackSize > 0);

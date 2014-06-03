@@ -180,8 +180,8 @@ void RJitGlobalDestruct()
 
 // stack map
 struct call_stack_struct {
-  unsigned regstack_size;
-  unsigned method_argc;
+  int regstack_size;
+  int method_argc;
 };
 
 typedef struct Stackmap {

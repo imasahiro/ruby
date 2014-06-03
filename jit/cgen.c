@@ -286,8 +286,6 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
   gen->path = path;
 }
 
-static void DeleteCallSiteEntry(void *ptr) {}
-
 static void cgen_freeze(CGen *gen, int id)
 {
   if (gen->buf.size > 0) {
@@ -437,7 +435,7 @@ static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
      sp[0..n] = StackMap[0..n]
    * return PC;
    */
-  unsigned i, j;
+  int i, j;
   hashmap_iterator_t itr = {0, 0};
   while(hashmap_next(SideExitBBs, &itr)) {
     VALUE *pc = itr.entry->k;
@@ -608,6 +606,9 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
 
   cgen_close(&gen);
   hashmap_dispose(&SideExitBBs, 0);
+  if (ptr) {
+    FreezeInlineCache(&Rec->CacheMng);
+  }
   return ptr;
 }
 
@@ -1077,32 +1078,34 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
     }
     case OPCODE_IFixnumToFloat : {
       IFixnumToFloat *ir = (IFixnumToFloat *) Inst;
-      cgen_printf(gen, "v%ld = DBL2NUM((double) v%ld);\n", Id, ir->Val);
+      cgen_printf(gen, "v%ld = DBL2NUM((double) FIX2LONG(v%ld));\n", Id, ir->Val);
       break;
     }
     case OPCODE_IFixnumToString : {
       IFixnumToString *ir = (IFixnumToString *) Inst;
-      cgen_printf(gen, "v%ld = flo_to_s(v%ld);\n", Id, ir->Val);
+      cgen_printf(gen, "v%ld = rb_fix2str(v%ld, 10);\n", Id, ir->Val);
       break;
     }
     case OPCODE_IFloatToFixnum : {
       IFloatToFixnum *ir = (IFloatToFixnum *) Inst;
-      assert(0 && "not implemented");
+      cgen_printf(gen,
+                  "v%ld = LONG2FIX((long)RFLOAT_VALUE(v%ld));\n",
+                  Id, ir->Val);
       break;
     }
     case OPCODE_IFloatToString : {
       IFloatToString *ir = (IFloatToString *) Inst;
-      assert(0 && "not implemented");
+      cgen_printf(gen, "v%ld = flo_to_s(v%ld);\n", Id, ir->Val);
       break;
     }
     case OPCODE_IStringToFixnum : {
       IStringToFixnum *ir = (IStringToFixnum *) Inst;
-      assert(0 && "not implemented");
+      cgen_printf(gen, "v%ld = rb_str_to_inum(v%ld, 10, 0);\n", Id, ir->Val);
       break;
     }
     case OPCODE_IStringToFloat : {
       IStringToFloat *ir = (IStringToFloat *) Inst;
-      assert(0 && "not implemented");
+      cgen_printf(gen, "v%ld = rb_str_to_dbl(v%ld, 0);\n", Id, ir->Val);
       break;
     }
     case OPCODE_IMathSin : {
@@ -1160,7 +1163,9 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
     }
     case OPCODE_IStringConcat : {
       IStringConcat *ir = (IStringConcat *) Inst;
-      assert(0 && "not implemented");
+      cgen_printf(gen,
+                  "v%ld = rb_str_plus(v%ld, v%ld);\n",
+                  Id, ir->LHS, ir->RHS);
       break;
     }
     case OPCODE_IArrayLength : {
@@ -1177,7 +1182,9 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
     }
     case OPCODE_IArrayConcat : {
       IArrayConcat *ir = (IArrayConcat *) Inst;
-      assert(0 && "not implemented");
+      cgen_printf(gen,
+                  "v%ld = rb_ary_plus(v%ld, v%ld);\n",
+                  Id, ir->LHS, ir->RHS);
       break;
     }
     case OPCODE_IArrayGet : {
@@ -1275,7 +1282,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
       break;
     }
     case OPCODE_IAllocString : {
-      IAllocString *ir = (IAllocString *) Inst;
+      //IAllocString *ir = (IAllocString *) Inst;
       assert(0 && "not implemented");
       break;
     }
@@ -1346,7 +1353,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
       break;
     }
     case OPCODE_ILoadBlock : {
-      ILoadBlock *ir = (ILoadBlock *) Inst;
+      //ILoadBlock *ir = (ILoadBlock *) Inst;
       cgen_printf(gen,
                   "{\n"
                   "  v%ld = (VALUE) VM_CF_BLOCK_PTR(reg_cfp);\n"
@@ -1509,12 +1516,12 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
       break;
     }
     case OPCODE_IJumpIf : {
-      IJumpIf *ir = (IJumpIf *) Inst;
+      //IJumpIf *ir = (IJumpIf *) Inst;
       assert(0 && "not implemented");
       break;
     }
     case OPCODE_IThrow : {
-      IThrow *ir = (IThrow *) Inst;
+      //IThrow *ir = (IThrow *) Inst;
       assert(0 && "not implemented");
       break;
     }

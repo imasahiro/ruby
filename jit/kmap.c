@@ -204,13 +204,14 @@ static int hashmap_next(hashmap_t *m, hashmap_iterator_t *itr)
   return 0;
 }
 
-static void hashmap_remove(hashmap_t *m, VALUE *key)
+static void hashmap_remove(hashmap_t *m, VALUE *key, void (*Destructor)(void*))
 {
   unsigned hash = hash6432shift(key);
   unsigned i, idx = hash & m->record_size_mask;
   for(i = 0; i < DELTA; ++i) {
     map_record_t *r = hashmap_at(m, idx);
     if(r->hash == hash && r->k == key) {
+      if(Destructor) { Destructor(r->v); }
       r->hash = 0;
       r->k    = 0;
       m->used_size -= 1;

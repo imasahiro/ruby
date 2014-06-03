@@ -72,6 +72,7 @@ static void gwjit_context_init()
 #endif
   jit_host_context._ruby_current_vm = ruby_current_vm;
   jit_host_context._ruby_vm_redefined_flag = ruby_vm_redefined_flag;
+  jit_host_context._jit_vm_redefined_flag  = jit_vm_redefined_flag;
   jit_host_context._ruby_vm_global_method_state = ruby_vm_global_method_state_ptr;
   jit_host_context._make_no_method_exception  = make_no_method_exception;
   jit_host_context._rb_gc_writebarrier  = rb_gc_writebarrier;
@@ -83,22 +84,6 @@ static void gwjit_context_init()
     assert(((VALUE*)&jit_host_context)[i] != 0 &&
            "some field of jit_host_context is not initialized");
   }
-}
-
-/* copied from vm.c */
-static int
-vm_redefinition_check_flag(VALUE klass)
-{
-  if (klass == rb_cFixnum) return FIXNUM_REDEFINED_OP_FLAG;
-  if (klass == rb_cFloat)  return FLOAT_REDEFINED_OP_FLAG;
-  if (klass == rb_cString) return STRING_REDEFINED_OP_FLAG;
-  if (klass == rb_cArray)  return ARRAY_REDEFINED_OP_FLAG;
-  if (klass == rb_cHash)   return HASH_REDEFINED_OP_FLAG;
-  if (klass == rb_cBignum) return BIGNUM_REDEFINED_OP_FLAG;
-  if (klass == rb_cSymbol) return SYMBOL_REDEFINED_OP_FLAG;
-  if (klass == rb_cTime)   return TIME_REDEFINED_OP_FLAG;
-  if (klass == rb_cRegexp) return REGEXP_REDEFINED_OP_FLAG;
-  return 0;
 }
 
 typedef struct Buffer {
@@ -781,11 +766,13 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
     case OPCODE_IGuardMethodRedefine : {
       IGuardMethodRedefine *ir = (IGuardMethodRedefine *) Inst;
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
+      const char *op = (ir->klass_flag < JIT_BOP_LAST_) ?
+          "BASIC_OP_UNREDEFINED_P" : "JIT_OP_UNREDEFINED_P";
       cgen_printf(gen,
-                  "if (!BASIC_OP_UNREDEFINED_P(%d, %d)) {\n"
+                  "if (!%s(%d, %d)) {\n"
                   "  goto L_exit%ld;\n"
                   "}\n",
-                  (int) ir->bop, (int)vm_redefinition_check_flag(ir->klass),
+                  op, ir->bop, ir->klass_flag,
                   ExitBlockId);
       break;
     }

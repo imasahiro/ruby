@@ -65,6 +65,7 @@ typedef struct gwjit_context {
 
   // Internal data structure
   short *_ruby_vm_redefined_flag;
+  short *_jit_vm_redefined_flag;
   struct rb_vm_struct *_ruby_current_vm;
   rb_serial_t *_ruby_vm_global_method_state;
 } gwjit_context_t;
@@ -80,6 +81,14 @@ typedef VALUE (*gwjit_native_func5_t)(VALUE, VALUE, VALUE, VALUE, VALUE);
 typedef VALUE (*gwjit_native_func6_t)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE);
 
 #define __int3__ asm volatile("int3")
+
+#define JIT_OP_UNREDEFINED_P(op, klass) \
+    (LIKELY((jit_vm_redefined_flag[(op) - JIT_BOP_LAST_]&(klass)) == 0))
+
+#define OP_UNREDEFINED_P(op, klass)\
+    ((op < BOP_LAST_)\
+     ? BASIC_OP_UNREDEFINED_P(op, klass)\
+     : JIT_OP_UNREDEFINED_P(op, klass))
 
 #ifdef GWJIT_HOST
 static VALUE

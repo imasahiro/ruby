@@ -141,8 +141,6 @@ static reg_t EmitSpecialInst_SetPropertyName(TraceRecorder *Rec, CALL_INFO ci, r
   return Emit_SetPropertyName(Rec, regs[0], ci->aux.index - 1, regs[1]);
 }
 
-#define Unredefined(...)      (1)
-#define GuardUnredefined(...) (1)
 static reg_t EmitSpecialInst(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci, enum ruby_vminsn_type opcode, VALUE* params, reg_t* regs)
 {
 #include "yarv2gwir.c"
@@ -224,21 +222,19 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALU
   VALUE params[ci->argc + 1];
 
   vm_search_method(ci, ci->recv = TOPN(ci->argc));
-  PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
   ci = CloneInlineCache(&Rec->CacheMng, ci);
 
   reg_t Rval = -1;
+
+  // user defined ruby method
+  if(ci->me && ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
+    return EmitPushFrame(Rec, reg_pc, ci, Rblock, block);
+  }
+
+  PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
   if ((Rval = EmitSpecialInst(Rec, reg_pc, ci, opcode, params, regs)) != -1) {
     _PUSH(Rval);
     return;
-  }
-
-  // check method type
-  if(ci->me) {
-    // user defined ruby method
-    if (ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
-      return EmitPushFrame(Rec, reg_pc, ci, Rblock, block);
-    }
   }
 
   // check ClassA.new(argc, argv)

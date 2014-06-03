@@ -167,11 +167,58 @@ class Unredefined < Rule
     def initialize(bop, type, guard)
         super(bop, type, guard)
     end
+
+    def symbolize(sym)
+        return "JIT_BOP_PLUS"      if sym == '+'
+        return "JIT_BOP_MINUS"     if sym == '-'
+        return "JIT_BOP_MULT"      if sym == '*'
+        return "JIT_BOP_DIV"       if sym == '/'
+        return "JIT_BOP_MOD"       if sym == '%'
+        return "JIT_BOP_LT"        if sym == '<'
+        return "JIT_BOP_LTLT"      if sym == '<<'
+        return "JIT_BOP_LE"        if sym == '<='
+        return "JIT_BOP_GT"        if sym == '>'
+        return "JIT_BOP_GE"        if sym == '>='
+        return "JIT_BOP_EQ"        if sym == '=='
+        return "JIT_BOP_NEQ"       if sym == '!='
+        return "JIT_BOP_NOT"       if sym == '!'
+        return "JIT_BOP_NOT"       if sym == "not";
+        return "JIT_BOP_AREF"      if sym == "[]"
+        return "JIT_BOP_ASET"      if sym == "[]="
+        return "JIT_BOP_LENGTH"    if sym == "length"
+        return "JIT_BOP_SIZE"      if sym == "size"
+        return "JIT_BOP_EMPTY_P"   if sym == "empty?"
+        return "JIT_BOP_SUCC"      if sym == "succ"
+        return "JIT_BOP_MATCH"     if sym == "=~"
+        return "JIT_BOP_FREEZE"    if sym == "freeze"
+
+        return "JIT_BOP_AND"       if sym == '&'
+        return "JIT_BOP_OR"        if sym == '|'
+        return "JIT_BOP_XOR"       if sym == '^'
+        return "JIT_BOP_INV"       if sym == '~'
+        return "JIT_BOP_RSHIFT"    if sym == '>>'
+
+        # math
+        return "JIT_BOP_SIN"       if sym == 'sin'
+        return "JIT_BOP_COS"       if sym == 'cos'
+        return "JIT_BOP_TAN"       if sym == 'tan'
+        return "JIT_BOP_EXPR"      if sym == 'expr'
+        return "JIT_BOP_SQRT"      if sym == 'sqrt'
+        return "JIT_BOP_LOG2"      if sym == 'log2'
+        return "JIT_BOP_LOG10"     if sym == 'log10'
+        return "JIT_BOP_" + sym.upcase
+    end
+
+    def redefinition_flag(klass)
+        return klass.to_s.upcase + "_REDEFINED_OP_FLAG"
+    end
+
     def to_s
-        "Unredefined(#{@type}, \"#{@val}\")"
+        "OP_UNREDEFINED_P(#{symbolize @val}, #{redefinition_flag @type})"
     end
     def emit_guard
-        "GuardUnredefined(#{@type}, \"#{@val}\")"
+        s  = "Emit_GuardMethodRedefine(Rec, pc, "
+        s += "#{redefinition_flag @type}, #{symbolize @val})"
     end
 end
 

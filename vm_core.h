@@ -466,7 +466,7 @@ typedef struct rb_vm_struct {
 #define SYMBOL_REDEFINED_OP_FLAG (1 << 6)
 #define TIME_REDEFINED_OP_FLAG   (1 << 7)
 #define REGEXP_REDEFINED_OP_FLAG (1 << 8)
-
+#define MATH_REDEFINED_OP_FLAG   (1 << 9)
 #define BASIC_OP_UNREDEFINED_P(op, klass) (LIKELY((GET_VM()->redefined_flag[(op)]&(klass)) == 0))
 
 #ifndef VM_DEBUG_BP_CHECK

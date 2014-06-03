@@ -49,6 +49,7 @@
 #define ruby_float_mod         jit_context->_ruby_float_mod
 #define rb_float_new_in_heap   jit_context->_rb_float_new_in_heap
 #define ruby_vm_redefined_flag jit_context->_ruby_vm_redefined_flag
+#define jit_vm_redefined_flag  jit_context->_jit_vm_redefined_flag
 
 #define rb_gc_writebarrier     jit_context->_rb_gc_writebarrier
 #define rb_exc_raise           jit_context->_rb_exc_raise

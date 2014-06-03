@@ -16,7 +16,7 @@ GuardBlockEqual       :use (Exit:VALUEPtr, R:reg_t, Block:VALUE)
 GuardObjectEqual      :use (Exit:VALUEPtr, R:reg_t, Obj:VALUE)
 GuardProperty         :use (Exit:VALUEPtr, R:reg_t, is_attr:int, cache:voidPtr)
 GuardMethodCache      :use (Exit:VALUEPtr, R:reg_t, ci:CALL_INFO)
-GuardMethodRedefine        (Exit:VALUEPtr, klass:VALUE, bop:int)
+GuardMethodRedefine        (Exit:VALUEPtr, klass_flag:int, bop:int)
 
 # fixnum operator
 FixnumAdd         :def :use (LHS:reg_t, RHS:reg_t)

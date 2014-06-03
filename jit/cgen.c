@@ -61,7 +61,6 @@ static void gwjit_context_init()
   jit_host_context._rb_ary_new_from_values = rb_ary_new_from_values;
   jit_host_context._rb_class_new_instance = rb_class_new_instance;
 
-
   // internal APIs
   jit_host_context._rb_float_new_in_heap = rb_float_new_in_heap;
   jit_host_context._ruby_float_mod  = ruby_float_mod;
@@ -771,8 +770,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
       cgen_printf(gen,
                   "{ CALL_INFO ci = (CALL_INFO) %p;\n"
-                  "  if (!(GET_GLOBAL_METHOD_STATE()     == ci->method_state &&\n"
-                  "        RCLASS_SERIAL(CLASS_OF(v%ld)) == ci->class_serial)) {\n"
+                  "  if (!(GET_GLOBAL_METHOD_STATE()    == ci->method_state &&\n"
+                  "       RCLASS_SERIAL(CLASS_OF(v%ld)) == ci->class_serial)) {\n"
                   "    goto L_exit%ld;\n"
                   "  }\n"
                   "}\n", ir->ci, ir->R, ExitBlockId);

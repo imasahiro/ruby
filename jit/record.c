@@ -110,7 +110,6 @@ static reg_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
   return Rval;
 }
 
-
 static reg_t EmitSpecialInst_FixnumSucc(TraceRecorder *Rec, CALL_INFO ci, reg_t *regs)
 {
   reg_t Robj = EmitIR(LoadConstFixnum, INT2FIX(1));
@@ -175,7 +174,6 @@ static void EmitSpecialInst1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VA
   EmitSpecialInst0(Rec, reg_pc, ci, opcode, params, regs);
 }
 
-
 static void EmitPushFrame(TraceRecorder *Rec, VALUE *reg_pc, CALL_INFO ci, reg_t Rblock, rb_block_t *block)
 {
   int i, argc = ci->argc + 1/*recv*/;
@@ -191,7 +189,6 @@ static void EmitPushFrame(TraceRecorder *Rec, VALUE *reg_pc, CALL_INFO ci, reg_t
   PushCallStack(Rec, argc, argv);
   _PUSH(EmitIR(FramePush, ci, 0, Rblock, argc, argv));
 }
-
 
 static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci)
 {

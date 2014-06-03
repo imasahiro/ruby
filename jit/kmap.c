@@ -55,7 +55,6 @@ typedef enum map_status_t {
   KMAP_ADDED  = 2
 } map_status_t;
 
-
 typedef struct kmap_record {
   unsigned hash;
   VALUE        *k;

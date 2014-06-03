@@ -121,6 +121,11 @@ static reg_t EmitSpecialInst_TimeSucc(TraceRecorder *Rec, CALL_INFO ci, reg_t *r
   return Emit_InvokeNative(Rec, rb_time_succ, 1, regs);
 }
 
+static reg_t EmitSpecialInst_StringFreeze(TraceRecorder *Rec, CALL_INFO ci, reg_t *regs)
+{
+  return _POP();
+}
+
 static reg_t EmitSpecialInst_GetPropertyName(TraceRecorder *Rec, CALL_INFO ci, reg_t *regs)
 {
   VALUE obj = ci->recv;
@@ -172,7 +177,6 @@ static void EmitSpecialInst1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VA
 {
   TakeStackSnapshot(Rec, reg_pc);
   CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
-  int i;
   reg_t regs[ci->argc + 1];
   VALUE params[ci->argc + 1];
   PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
@@ -662,14 +666,8 @@ static void record_send(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *
 
 static void record_opt_str_freeze(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  if (BASIC_OP_UNREDEFINED_P(BOP_FREEZE, STRING_REDEFINED_OP_FLAG)) {
-    TakeStackSnapshot(Rec, reg_pc);
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cString, BOP_FREEZE);
-    _PUSH(_POP());
-  }
-  else {
-    not_support_op(Rec, reg_cfp, reg_pc, "opt_str_freeze");
-  }
+  assert(0 && "need to test");
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_str_freeze));
 }
 
 static void record_opt_send_simple(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)

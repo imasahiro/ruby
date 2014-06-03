@@ -78,7 +78,7 @@ static reg_t AdjustStack(TraceRecorder *Rec)
    * L3: Jump Block  | StackPop(2)
    * L4: StackPop(1) | Jump Block
    */
-  int i, jumpIdx = Rec->EntryBlock->size - 1;
+  int jumpIdx = Rec->EntryBlock->size - 1;
   lir_compile_data_header_t **Insts = Rec->EntryBlock->Insts;
   lir_compile_data_header_t *last, *jump;
   jump = Insts[jumpIdx - 1];
@@ -87,6 +87,7 @@ static reg_t AdjustStack(TraceRecorder *Rec)
   Insts[jumpIdx]     = jump;
   Rec->Block = PrevBB;
   assert(Rec->EntryBlock);
+#if 0
   /*
    *      before     |   after
    * L0: StackAdjust | StackAdjust
@@ -98,6 +99,7 @@ static reg_t AdjustStack(TraceRecorder *Rec)
   if (jumpIdx > 2) {
     // Insts.insert(1, last)
     lir_compile_data_header_t *prev = Insts[1];
+    int i;
     for (i = 2; i < jumpIdx; i++) {
       lir_compile_data_header_t *tmp = Insts[i];
       Insts[i] = prev;
@@ -105,6 +107,7 @@ static reg_t AdjustStack(TraceRecorder *Rec)
     }
     Insts[1] = last;
   }
+#endif
   return Reg;
 }
 

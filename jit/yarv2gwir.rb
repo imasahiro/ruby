@@ -54,6 +54,7 @@ DATA = [
     ["StringEmptyP", "opt_empty_p", "empty?", [:String]],
     ["StringConcat", "opt_plus",    "+",      [:String, :String]],
     ["StringConcat", "opt_ltlt",    "<<",     [:String, :String]],
+    ["StringFreeze", "opt_str_freeze", "freeze", [:String]],
 
     ["ArrayLength", "opt_length",  "length", [:Array]],
     ["ArrayLength", "opt_size",    "size",   [:Array]],
@@ -322,7 +323,7 @@ DATA.each { |op|
 }
 
 max_param_size.times {|i|
-    puts "int is_flonum#{i} = 0;"
+    puts "int is_flonum#{i} = 0; (void) is_flonum#{i};"
 }
 
 DATA.each.with_index { |op, i|

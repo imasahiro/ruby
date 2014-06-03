@@ -141,9 +141,6 @@ static void add_opt_method(VALUE klass, ID mid, VALUE bop)
 
 static void rb_jit_init_redefined_flag(void)
 {
-  ID mid;
-  VALUE bop;
-
   jit_opt_method_table = st_init_numtable();
   DEF(Fixnum, "&",  JIT_BOP_AND);
   DEF(Fixnum, "|",  JIT_BOP_OR);

@@ -697,6 +697,15 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
                   "}\n", ir->R, ExitBlockId);
       break;
     }
+    case OPCODE_IGuardTypeMath : {
+      IGuardTypeMath *ir = (IGuardTypeMath *) Inst;
+      long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
+      cgen_printf(gen,
+                  "if(!(RBASIC_CLASS(v%ld) == jit_context->cMath)) {\n"
+                  "  goto L_exit%ld;\n"
+                  "}\n", ir->R, ExitBlockId);
+      break;
+    }
     case OPCODE_IGuardTypeObject : {
       IGuardTypeObject *ir = (IGuardTypeObject *) Inst;
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);

@@ -52,8 +52,8 @@ vm_load_cache(VALUE obj, ID id, IC ic, rb_call_info_t *ci, int is_attr)
 
 #define _POP()       PopRegister(Rec)
 #define _PUSH(REG)   PushRegister(Rec, REG)
-#define _TOPN(N)     TopRegister(Rec, (N))
-#define _SET(N, REG) SetRegister(Rec, (N), REG)
+#define _TOPN(N)     TopRegister(Rec, (int)(N))
+#define _SET(N, REG) SetRegister(Rec, (int)(N), REG)
 
 static reg_t EmitConverter(TraceRecorder *Rec, VALUE val, reg_t Rval, VALUE *reg_pc, int type) {
   if (FIXNUM_P(val)) {
@@ -110,6 +110,72 @@ static reg_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
   return Rval;
 }
 
+
+static reg_t EmitSpecialInst_FixnumSucc(TraceRecorder *Rec, CALL_INFO ci, reg_t *regs)
+{
+  reg_t Robj = EmitIR(LoadConstFixnum, INT2FIX(1));
+  return EmitIR(FixnumAddOverflow, regs[0], Robj);
+}
+
+static reg_t EmitSpecialInst_TimeSucc(TraceRecorder *Rec, CALL_INFO ci, reg_t *regs)
+{
+  return Emit_InvokeNative(Rec, rb_time_succ, 1, regs);
+}
+
+static reg_t EmitSpecialInst_GetPropertyName(TraceRecorder *Rec, CALL_INFO ci, reg_t *regs)
+{
+  VALUE obj = ci->recv;
+  VALUE *reg_pc = Rec->CurrentEvent->pc;
+  int cacheable = vm_load_cache(obj, ci->me->def->body.attr.id, 0, ci, 1);
+  assert(ci->aux.index > 0 && cacheable);
+  EmitIR(GuardProperty, reg_pc, regs[0], 1/*is_attr*/, (void *)ci);
+  return Emit_GetPropertyName(Rec, regs[0], ci->aux.index - 1);
+}
+
+static reg_t EmitSpecialInst_SetPropertyName(TraceRecorder *Rec, CALL_INFO ci, reg_t *regs)
+{
+  VALUE obj = ci->recv;
+  VALUE *reg_pc = Rec->CurrentEvent->pc;
+  int cacheable = vm_load_cache(obj, ci->me->def->body.attr.id, 0, ci, 1);
+  assert(ci->aux.index > 0 && cacheable);
+  EmitIR(GuardProperty, reg_pc, regs[0], 1/*is_attr*/, (void *)ci);
+  return Emit_SetPropertyName(Rec, regs[0], ci->aux.index - 1, regs[1]);
+}
+
+#define Unredefined(...)      (1)
+#define GuardUnredefined(...) (1)
+static reg_t EmitSpecialInst(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci, int opcode, VALUE* params, reg_t* regs)
+{
+#include "yarv2gwir.c"
+  return -1;
+}
+
+static void EmitSpecialInst0(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci, int opcode, VALUE* params, reg_t* regs)
+{
+  reg_t Rval = -1;
+  if ((Rval = EmitSpecialInst(Rec, pc, ci, opcode, params, regs)) == -1) {
+    vm_search_method(ci, params[0]);
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
+    EmitIR(GuardMethodCache, pc, params[0], ci);
+    Rval = EmitIR(InvokeMethod, ci, 2, regs);
+  }
+  _PUSH(Rval);
+}
+
+static void EmitSpecialInst1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, int opcode)
+{
+  TakeStackSnapshot(Rec, reg_pc);
+  CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
+  VALUE recv  = TOPN(1);
+  VALUE obj   = TOPN(0);
+  reg_t Robj  = _POP();
+  reg_t Rrecv = _POP();
+  VALUE params[] = {recv, obj};
+  reg_t regs[] = {Rrecv, Robj};
+  EmitSpecialInst0(Rec, reg_pc, ci, opcode, params, regs);
+}
+
+
 static void EmitPushFrame(TraceRecorder *Rec, VALUE *reg_pc, CALL_INFO ci, reg_t Rblock, rb_block_t *block)
 {
   int i, argc = ci->argc + 1/*recv*/;
@@ -126,78 +192,6 @@ static void EmitPushFrame(TraceRecorder *Rec, VALUE *reg_pc, CALL_INFO ci, reg_t
   _PUSH(EmitIR(FramePush, ci, 0, Rblock, argc, argv));
 }
 
-
-static void EmitAttribute(TraceRecorder *Rec, VALUE *reg_pc, int getter, CALL_INFO ci)
-{
-  reg_t Rval, Rrecv = 0;
-  if (getter) {
-    Rrecv = _POP();
-  }
-  else {
-    Rval  = _POP();
-    Rrecv = _POP();
-  }
-
-  VALUE obj = ci->recv;
-  int cacheable = vm_load_cache(obj, ci->me->def->body.attr.id, 0, ci, 1);
-  assert(ci->aux.index > 0 && cacheable);
-  EmitIR(GuardTypeObject, reg_pc, Rrecv);
-  EmitIR(GuardProperty, reg_pc, Rrecv, 1/*is_attr*/, (void *)ci);
-  if (ci->argc == 0) {
-    _PUSH(EmitIR(GetPropertyName, Rrecv, ci->aux.index - 1));
-  }
-  else {
-    assert(ci->argc == 1);
-    _PUSH(EmitIR(SetPropertyName, Rrecv, ci->aux.index - 1, Rval));
-  }
-}
-
-static void EmitMathAPI(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci)
-{
-  reg_t Rrecv;
-  VALUE obj;
-  if(ci->orig_argc == 1) {
-    Rrecv = _POP();
-    obj   = TOPN(0);
-    if (EmitConverter(Rec, obj, Rrecv, reg_pc, T_FLOAT) == -1) {
-      fprintf(stderr, "unsupported converter typeof(recv) => T_FLOAT\n");
-      TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_NATIVE_METHOD);
-      return;
-    }
-
-    if(ci->mid == rb_intern("exp")) {
-      _PUSH(EmitIR(MathExp, Rrecv));
-      return;
-    }
-    if(ci->mid == rb_intern("log2")) {
-      _PUSH(EmitIR(MathLog2, Rrecv));
-      return;
-    }
-    if(ci->mid == rb_intern("log10")) {
-      _PUSH(EmitIR(MathLog10, Rrecv));
-      return;
-    }
-    if(ci->mid == rb_intern("sqrt")) {
-      _PUSH(EmitIR(MathSqrt, Rrecv));
-      return;
-    }
-    if(ci->mid == rb_intern("sin")) {
-      _PUSH(EmitIR(MathSin, Rrecv));
-      return;
-    }
-    if(ci->mid == rb_intern("cos")) {
-      _PUSH(EmitIR(MathCos, Rrecv));
-      return;
-    }
-    if(ci->mid == rb_intern("tan")) {
-      _PUSH(EmitIR(MathTan, Rrecv));
-      return;
-    }
-  }
-  // unsupported math api
-  fprintf(stderr, "unsupported math api\n");
-  TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_NATIVE_METHOD);
-}
 
 static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci)
 {
@@ -220,35 +214,30 @@ static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VAL
   _PUSH(EmitIR(AllocObject, klass, argc, argv));
 }
 
-static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci, rb_block_t *block, reg_t Rblock)
+static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, CALL_INFO ci, rb_block_t *block, reg_t Rblock, int opcode)
 {
-  reg_t Rrecv;
-  VALUE obj = TOPN(ci->argc);
+  int i, argc = ci->argc + 1/*recv*/;
+  reg_t regs[argc];
+  VALUE params[argc];
+
+  for (i = 0; i < argc; i++) {
+    regs[i]   = _TOPN(ci->argc - i);
+    params[i] = TOPN(ci->argc - i);
+  }
 
   vm_search_method(ci, ci->recv = TOPN(ci->argc));
   ci = CloneInlineCache(&Rec->CacheMng, ci);
 
+  reg_t Rval = -1;
+  if ((Rval = EmitSpecialInst(Rec, reg_pc, ci, opcode, params, regs)) != -1) {
+    return;
+  }
+
   // check method type
   if(ci->me) {
-    // getter method
-    if(ci->me->def->type == VM_METHOD_TYPE_IVAR) {
-      return EmitAttribute(Rec, reg_pc, 1, ci);
-    }
-    // setter method
-    if(ci->me->def->type == VM_METHOD_TYPE_ATTRSET) {
-      return EmitAttribute(Rec, reg_pc, 0, ci);
-    }
     // user defined ruby method
     if (ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
       return EmitPushFrame(Rec, reg_pc, ci, Rblock, block);
-    }
-  }
-
-  // check Math method
-  if (ci->me && ci->me->def->type == VM_METHOD_TYPE_CFUNC) {
-    VALUE cMath = rb_singleton_class(rb_mMath);
-    if (ci->me->klass == cMath) {
-      return EmitMathAPI(Rec, reg_cfp, reg_pc, ci);
     }
   }
 
@@ -262,7 +251,7 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALU
   // check block_given?
   extern VALUE rb_f_block_given_p(void);
   if (check_cfunc(ci->me,  rb_f_block_given_p)) {
-    Rrecv = EmitIR(LoadSelf);
+    reg_t Rrecv = EmitIR(LoadSelf);
     EmitIR(GuardMethodCache, reg_pc, Rrecv, ci);
     EmitIR(InvokeNative, rb_f_block_given_p, 0, NULL);
     return;
@@ -672,7 +661,7 @@ static void record_send(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *
   }
 
   TakeStackSnapshot(Rec, reg_pc);
-  EmitMethodCall(Rec, reg_cfp, reg_pc, ci, block, Rblock);
+  EmitMethodCall(Rec, reg_cfp, reg_pc, ci, block, Rblock, BIN(send));
 }
 
 static void record_opt_str_freeze(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
@@ -691,7 +680,7 @@ static void record_opt_send_simple(TraceRecorder *Rec, rb_control_frame_t *reg_c
 {
   CALL_INFO ci = (CALL_INFO) GET_OPERAND(1);
   TakeStackSnapshot(Rec, reg_pc);
-  EmitMethodCall(Rec, reg_cfp, reg_pc, ci, 0, 0);
+  EmitMethodCall(Rec, reg_cfp, reg_pc, ci, 0, 0, BIN(opt_send_simple));
 }
 
 static void record_invokesuper(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
@@ -863,292 +852,74 @@ static void record_opt_case_dispatch(TraceRecorder *Rec, rb_control_frame_t *reg
   not_support_op(Rec, reg_cfp, reg_pc, "opt_case_dispatch");
 }
 
-#define _record_binary(Rec, reg_cfp, reg_pc, bop, opname) do {\
-  VALUE recv, obj;\
-  reg_t Robj, Rrecv, Rval;\
-  CALL_INFO ci;\
-  TakeStackSnapshot(Rec, reg_pc);\
-  ci   = (CALL_INFO)GET_OPERAND(1);\
-  recv = TOPN(1);\
-  obj  = TOPN(0);\
-  Robj  = _POP();\
-  Rrecv = _POP();\
-  reg_t params[] = {Rrecv, Robj};\
-  if (FIXNUM_2_P(recv, obj) &&\
-      BASIC_OP_UNREDEFINED_P(bop, FIXNUM_REDEFINED_OP_FLAG)) {\
-    EmitIR(GuardTypeFixnum, reg_pc, Rrecv);\
-    EmitIR(GuardTypeFixnum, reg_pc, Robj);\
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cFixnum, bop);\
-    Rval = EmitIR(Fixnum##opname##Overflow, Rrecv, Robj);\
-  }\
-  else if (FLONUM_2_P(recv, obj) &&\
-           BASIC_OP_UNREDEFINED_P(bop, FLOAT_REDEFINED_OP_FLAG)) {\
-    EmitIR(GuardTypeFlonum, reg_pc, Rrecv);\
-    EmitIR(GuardTypeFlonum, reg_pc, Robj );\
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cFloat, bop);\
-    Rval = EmitIR(Float##opname, Rrecv, Robj);\
-  }\
-  else if (!SPECIAL_CONST_P(recv) && !SPECIAL_CONST_P(obj)) {\
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);\
-    EmitIR(GuardTypeSpecialConst, reg_pc, Robj );\
-    VALUE recv_klass = RBASIC_CLASS(recv);\
-    VALUE obj_klass  = RBASIC_CLASS(obj);\
-    if (recv_klass == rb_cFloat && obj_klass ==  rb_cFloat &&\
-        BASIC_OP_UNREDEFINED_P(bop, FLOAT_REDEFINED_OP_FLAG)) {\
-      EmitIR(GuardTypeFloat, reg_pc, Rrecv);\
-      EmitIR(GuardTypeFloat, reg_pc, Robj );\
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cFloat, bop);\
-      Rval = EmitIR(Float##opname, Rrecv, Robj);\
-    }\
-    else if (bop == BOP_PLUS &&\
-             recv_klass == rb_cString && obj_klass == rb_cString &&\
-             BASIC_OP_UNREDEFINED_P(bop, STRING_REDEFINED_OP_FLAG)) {\
-      EmitIR(GuardTypeString, reg_pc, Rrecv);\
-      EmitIR(GuardTypeString, reg_pc, Robj );\
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cString, bop);\
-      Rval = EmitIR(InvokeNative, rb_str_plus, 2, params);\
-    }\
-    else if (bop == BOP_PLUS &&\
-             recv_klass == rb_cArray &&\
-             BASIC_OP_UNREDEFINED_P(bop, ARRAY_REDEFINED_OP_FLAG)) {\
-      EmitIR(GuardTypeArray, reg_pc, Rrecv);\
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cArray, bop);\
-      Rval = EmitIR(InvokeNative, rb_ary_plus, 2, params);\
-    }\
-    else {\
-      goto normal_dispatch;\
-    }\
-  }\
-  else {\
-    normal_dispatch:\
-    vm_search_method(ci, recv);\
-    ci = CloneInlineCache(&Rec->CacheMng, ci);\
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);\
-    Rval = EmitIR(InvokeMethod, ci, 2, params);\
-  }\
-  _PUSH(Rval);\
-} while(0)
-
-#define _record_cond(Rec, reg_cfp, reg_pc, bop, opname) do {\
-  VALUE recv, obj;\
-  reg_t Robj, Rrecv, Rval;\
-  TakeStackSnapshot(Rec, reg_pc);\
-  recv = TOPN(1);\
-  obj  = TOPN(0);\
-  Robj  = _POP();\
-  Rrecv = _POP();\
-  if (FIXNUM_2_P(recv, obj) &&\
-      BASIC_OP_UNREDEFINED_P(bop, FIXNUM_REDEFINED_OP_FLAG)) {\
-    EmitIR(GuardTypeFixnum, reg_pc, Rrecv);\
-    EmitIR(GuardTypeFixnum, reg_pc, Robj );\
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cFixnum, bop);\
-    Rval = EmitIR(Fixnum##opname, Rrecv, Robj);\
-  }\
-  else if (FLONUM_2_P(recv, obj) &&\
-           BASIC_OP_UNREDEFINED_P(bop, FLOAT_REDEFINED_OP_FLAG)) {\
-    EmitIR(GuardTypeFlonum, reg_pc, Rrecv);\
-    EmitIR(GuardTypeFlonum, reg_pc, Robj );\
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cFloat, bop);\
-    Rval = EmitIR(Float##opname, Rrecv, Robj);\
-  }\
-  else {\
-    CALL_INFO ci = (CALL_INFO) GET_OPERAND(1);\
-    reg_t params[] = {Rrecv, Robj};\
-    vm_search_method(ci, recv);\
-    ci = CloneInlineCache(&Rec->CacheMng, ci);\
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);\
-    Rval = EmitIR(InvokeMethod, ci, 2, params);\
-  }\
-  _PUSH(Rval);\
-} while(0)
-
 static void record_opt_plus(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_binary(Rec, reg_cfp, reg_pc, BOP_PLUS, Add);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_plus));
 }
 
 static void record_opt_minus(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_binary(Rec, reg_cfp, reg_pc, BOP_MINUS, Sub);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_minus));
 }
 
 static void record_opt_mult(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_binary(Rec, reg_cfp, reg_pc, BOP_MULT, Mul);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_mult));
 }
 
 static void record_opt_div(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_binary(Rec, reg_cfp, reg_pc, BOP_DIV, Div);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_div));
 }
 
 static void record_opt_mod(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_binary(Rec, reg_cfp, reg_pc, BOP_MOD, Mod);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_mod));
 }
 
 static void record_opt_eq(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_cond(Rec, reg_cfp, reg_pc, BOP_EQ, Eq);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_eq));
 }
 
 static void record_opt_neq(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_cond(Rec, reg_cfp, reg_pc, BOP_NEQ, Ne);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_neq));
 }
 
 static void record_opt_lt(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_cond(Rec, reg_cfp, reg_pc, BOP_LT, Lt);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_lt));
 }
 
 static void record_opt_le(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_cond(Rec, reg_cfp, reg_pc, BOP_LE, Le);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_le));
 }
 
 static void record_opt_gt(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_cond(Rec, reg_cfp, reg_pc, BOP_GT, Gt);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_gt));
 }
 
 static void record_opt_ge(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_cond(Rec, reg_cfp, reg_pc, BOP_GE, Ge);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_ge));
 }
 
 static void record_opt_ltlt(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  VALUE recv, obj;
-  reg_t Robj, Rrecv, Rval;
-  CALL_INFO ci;
-  TakeStackSnapshot(Rec, reg_pc);
-  ci   = (CALL_INFO)GET_OPERAND(1);
-  recv = TOPN(1);
-  obj  = TOPN(0);
-  Robj  = _POP();
-  Rrecv = _POP();
-  reg_t params[] = {Rrecv, Robj};
-
-  if (!SPECIAL_CONST_P(recv) && !SPECIAL_CONST_P(obj)) {
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    EmitIR(GuardTypeSpecialConst, reg_pc, Robj );
-    VALUE recv_klass = RBASIC_CLASS(recv);
-    VALUE obj_klass  = RBASIC_CLASS(obj);
-    if (recv_klass == rb_cString && obj_klass == rb_cString &&
-        BASIC_OP_UNREDEFINED_P(BOP_LTLT, STRING_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeString, reg_pc, Rrecv);
-      EmitIR(GuardTypeString, reg_pc, Robj );
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cString, BOP_LTLT);
-      Rval = EmitIR(InvokeNative, rb_str_plus, 2, params);
-    }
-    else if(recv_klass == rb_cArray &&
-            BASIC_OP_UNREDEFINED_P(BOP_LTLT, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeArray, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cArray, BOP_LTLT);
-      Rval = EmitIR(InvokeNative, rb_ary_plus, 2, params);
-    }
-    else {
-      goto normal_dispatch;
-    }
-  }
-  else {
-normal_dispatch:
-    vm_search_method(ci, recv);
-    ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-    Rval = EmitIR(InvokeMethod, ci, 2, params);
-  }
-  _PUSH(Rval);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_ltlt));
 }
 
 static void record_opt_aref(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  VALUE recv, obj;
-  reg_t Robj, Rrecv, Rval;
-  CALL_INFO ci;
-  TakeStackSnapshot(Rec, reg_pc);
-  ci   = (CALL_INFO)GET_OPERAND(1);
-  recv = TOPN(1);
-  obj  = TOPN(0);
-  Robj  = _POP();
-  Rrecv = _POP();
-  reg_t params[] = {Rrecv, Robj};
-
-  if (!SPECIAL_CONST_P(recv)) {
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    VALUE recv_klass = RBASIC_CLASS(recv);
-    if(recv_klass == rb_cArray && FIXNUM_P(obj) &&
-       BASIC_OP_UNREDEFINED_P(BOP_AREF, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeArray, reg_pc,  Rrecv);
-      EmitIR(GuardTypeFixnum, reg_pc, Robj);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cArray, BOP_AREF);
-      Rval = EmitIR(ArrayGet, Rrecv, Robj);
-    }
-    else if(recv_klass == rb_cHash &&
-            BASIC_OP_UNREDEFINED_P(BOP_AREF, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeHash, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cHash, BOP_AREF);
-      Rval = EmitIR(HashGet, Rrecv, Robj);
-    }
-    else {
-      goto normal_dispatch;
-    }
-  }
-  else {
-normal_dispatch:
-    vm_search_method(ci, recv);
-    ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-    Rval = EmitIR(InvokeMethod, ci, 2, params);
-  }
-  _PUSH(Rval);
-
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_aref));
 }
 
 static void record_opt_aset(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  VALUE recv, obj, set;
-  reg_t Robj, Rrecv, Rset, Rval;
-  CALL_INFO ci;
-  TakeStackSnapshot(Rec, reg_pc);
-  ci    = (CALL_INFO)GET_OPERAND(1);
-  recv  = TOPN(2);
-  obj   = TOPN(1);
-  set   = TOPN(0);
-  Rset  = _POP();
-  Robj  = _POP();
-  Rrecv = _POP();
-  reg_t params[] = {Rrecv, Robj, Rset};
-
-  if (!SPECIAL_CONST_P(recv)) {
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    VALUE recv_klass = RBASIC_CLASS(recv);
-    if(recv_klass == rb_cArray && FIXNUM_P(obj) &&
-       BASIC_OP_UNREDEFINED_P(BOP_ASET, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeArray, reg_pc,  Rrecv);
-      EmitIR(GuardTypeFixnum, reg_pc, Robj);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cArray, BOP_ASET);
-      Rval = EmitIR(ArraySet, Rrecv, Robj, Rset);
-    }
-    else if(recv_klass == rb_cHash &&
-            BASIC_OP_UNREDEFINED_P(BOP_ASET, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeHash, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cHash, BOP_ASET);
-      Rval = EmitIR(HashSet, Rrecv, Robj, Rset);
-    }
-    else {
-      goto normal_dispatch;
-    }
-  }
-  else {
-normal_dispatch:
-    vm_search_method(ci, recv);
-    ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-    Rval = EmitIR(InvokeMethod, ci, 3, params);
-  }
-  _PUSH(Rval);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_aset));
 }
 
 static void record_opt_aset_with(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
@@ -1165,258 +936,83 @@ static void record_opt_aset_with(TraceRecorder *Rec, rb_control_frame_t *reg_cfp
   Rrecv = _POP();
   Robj  = EmitIR(LoadConstString, key);
 
-  reg_t params[] = {Rrecv, Robj, Rval};
-
-  if (!SPECIAL_CONST_P(recv)) {
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    VALUE recv_klass = RBASIC_CLASS(recv);
-    if(recv_klass == rb_cHash &&
-       BASIC_OP_UNREDEFINED_P(BOP_ASET, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeHash, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cHash, BOP_ASET);
-      Rval = EmitIR(HashSet, Rrecv, Robj, Rval);
-    }
-    else {
-      goto normal_dispatch;
-    }
-  }
-  else {
-normal_dispatch:
-    vm_search_method(ci, recv);
-    ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-    Rval = EmitIR(InvokeMethod, ci, 3, params);
-  }
-  _PUSH(Rval);
+  VALUE params[] = {recv, key, val};
+  reg_t regs[] = {Rrecv, Robj, Rval};
+  EmitSpecialInst0(Rec, reg_pc, ci, BIN(opt_aset_with), params, regs);
 }
 
 static void record_opt_aref_with(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
   VALUE recv, key;
-  reg_t Robj, Rrecv, Rval;
+  reg_t Robj, Rrecv;
   CALL_INFO ci;
   TakeStackSnapshot(Rec, reg_pc);
   ci    = (CALL_INFO)GET_OPERAND(1);
   key   = (VALUE)    GET_OPERAND(2);
   recv  = TOPN(0);
   Rrecv = _POP();
-
   Robj  = EmitIR(LoadConstString, key);
-  reg_t params[] = {Rrecv, Robj};
 
-  if (!SPECIAL_CONST_P(recv)) {
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    VALUE recv_klass = RBASIC_CLASS(recv);
-    if(recv_klass == rb_cHash &&
-       BASIC_OP_UNREDEFINED_P(BOP_AREF, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeHash, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cHash, BOP_AREF);
-      Rval = EmitIR(HashGet, Rrecv, Robj);
-    }
-    else {
-      goto normal_dispatch;
-    }
-  }
-  else {
-normal_dispatch:
-    vm_search_method(ci, recv);
-    ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-    Rval = EmitIR(InvokeMethod, ci, 2, params);
-  }
-  _PUSH(Rval);
-}
-
-static void _record_length(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc, int bop)
-{
-  VALUE recv;
-  reg_t Rrecv, Rval;
-  reg_t params[1];
-  CALL_INFO ci;
-  TakeStackSnapshot(Rec, reg_pc);
-  ci   = (CALL_INFO)GET_OPERAND(1);
-  recv = TOPN(0);
-  Rrecv = _POP();
-  params[0] = Rrecv;
-  if (!SPECIAL_CONST_P(recv)) {
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    if (RBASIC_CLASS(recv) == rb_cString &&
-        BASIC_OP_UNREDEFINED_P(bop, STRING_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeString, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cString, bop);
-      Rval = EmitIR(StringLength, Rrecv);
-    }
-    else if (RBASIC_CLASS(recv) == rb_cArray &&
-             BASIC_OP_UNREDEFINED_P(bop, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeArray, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cArray, bop);
-      Rval = EmitIR(ArrayLength, Rrecv);
-    }
-    else if (RBASIC_CLASS(recv) == rb_cHash &&
-             BASIC_OP_UNREDEFINED_P(bop, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeHash, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cHash, bop);
-      Rval = EmitIR(HashLength, Rrecv);
-    }
-    else {
-      goto normal_dispatch;
-    }
-  }
-  else {
-normal_dispatch:
-    vm_search_method(ci, recv);
-    ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-    Rval = EmitIR(InvokeMethod, ci, 1, params);
-  }
-  _PUSH(Rval);
+  VALUE params[] = {recv, key};
+  reg_t regs[] = {Rrecv, Robj};
+  EmitSpecialInst0(Rec, reg_pc, ci, BIN(opt_aref_with), params, regs);
 }
 
 static void record_opt_length(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_length(Rec, reg_cfp, reg_pc, BOP_LENGTH);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_length));
 }
 
 static void record_opt_size(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  _record_length(Rec, reg_cfp, reg_pc, BOP_SIZE);
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_size));
 }
 
 static void record_opt_empty_p(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  VALUE recv;
-  reg_t Rrecv, Rval;
-  CALL_INFO ci;
-  TakeStackSnapshot(Rec, reg_pc);
-  ci   = (CALL_INFO)GET_OPERAND(1);
-  recv = TOPN(0);
-  Rrecv = _POP();
-  reg_t params[] = {Rrecv};
-  if (!SPECIAL_CONST_P(recv)) {
-    EmitIR(GuardTypeSpecialConst, reg_pc, Rrecv);
-    if (RBASIC_CLASS(recv) == rb_cString &&
-        BASIC_OP_UNREDEFINED_P(BOP_EMPTY_P, STRING_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeString, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cString, BOP_EMPTY_P);
-      Rval = EmitIR(StringEmptyP, Rrecv);
-    }
-    else if (RBASIC_CLASS(recv) == rb_cArray &&
-             BASIC_OP_UNREDEFINED_P(BOP_EMPTY_P, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeArray, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cArray, BOP_EMPTY_P);
-      Rval = EmitIR(ArrayEmptyP, Rrecv);
-    }
-    else if (RBASIC_CLASS(recv) == rb_cHash &&
-             BASIC_OP_UNREDEFINED_P(BOP_EMPTY_P, ARRAY_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardTypeHash, reg_pc, Rrecv);
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cHash, BOP_EMPTY_P);
-      Rval = EmitIR(HashEmptyP, Rrecv);
-    }
-    else {
-      goto normal_dispatch;
-    }
-  }
-  else {
-normal_dispatch:
-    vm_search_method(ci, recv);
-    ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-    Rval = EmitIR(InvokeMethod, ci, 1, params);
-  }
-  _PUSH(Rval);
-
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_empty_p));
 }
 
 static void record_opt_succ(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  VALUE recv = TOPN(0);
-  reg_t Rrecv, Robj;
-  if (SPECIAL_CONST_P(recv) && FIXNUM_P(recv) &&
-      BASIC_OP_UNREDEFINED_P(BOP_SUCC, FIXNUM_REDEFINED_OP_FLAG)) {
-    TakeStackSnapshot(Rec, reg_pc);
-    Rrecv = _POP();
-    EmitIR(GuardTypeFixnum, reg_pc, Rrecv);
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cFixnum, BOP_SUCC);
-    Robj  = EmitIR(LoadConstFixnum, INT2FIX(1));
-    _PUSH(EmitIR(FixnumAddOverflow, Rrecv, Robj));
-    return;
-  }
-  else {
-    if (RBASIC_CLASS(recv) == rb_cString &&
-        BASIC_OP_UNREDEFINED_P(BOP_SUCC, STRING_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cString, BOP_SUCC);
-      Rrecv = _POP();
-      EmitIR(GuardTypeString, reg_pc, Rrecv);
-      reg_t argv[] = {_POP()};
-      _PUSH(EmitIR(InvokeNative, rb_str_succ, 1, argv));
-      return;
-    }
-    else if (RBASIC_CLASS(recv) == rb_cTime &&
-             BASIC_OP_UNREDEFINED_P(BOP_SUCC, TIME_REDEFINED_OP_FLAG)) {
-      EmitIR(GuardMethodRedefine, reg_pc, rb_cTime, BOP_SUCC);
-      Rrecv = _POP();
-      EmitIR(GuardTypeTime, reg_pc, Rrecv);
-      reg_t argv[] = {_POP()};
-      _PUSH(EmitIR(InvokeNative, rb_time_succ, 1, argv));
-      return;
-    }
-  }
-  not_support_op(Rec, reg_cfp, reg_pc, "opt_succ");
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_succ));
 }
 
 static void record_opt_not(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  not_support_op(Rec, reg_cfp, reg_pc, "opt_not");
-  //CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
-  //reg_t params[] = {_POP()};
-
-  //TakeStackSnapshot(Rec, reg_pc);
-
-  //extern VALUE rb_obj_not(VALUE obj);
-  //vm_search_method(ci, recv);
-  //ci = CloneInlineCache(&Rec->CacheMng, ci);
-
-  //EmitIR(GuardMethodCache, reg_pc, params[0], ci);
-  //if (check_cfunc(ci->me, rb_obj_not)) {
-  //  val = RTEST(recv) ? Qfalse : Qtrue;
-  //}
-  //else {
-  //  PUSH(recv);
-  //  CALL_SIMPLE_METHOD(recv);
-  //}
+  EmitSpecialInst1(Rec, reg_cfp, reg_pc, BIN(opt_not));
 }
 
 static void record_opt_regexpmatch1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  if (BASIC_OP_UNREDEFINED_P(BOP_MATCH, REGEXP_REDEFINED_OP_FLAG)) {
-    VALUE r = GET_OPERAND(1);
-    reg_t RRe;
-    TakeStackSnapshot(Rec, reg_pc);
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cRegexp, BOP_MATCH);
-    RRe = EmitLoadConst(Rec, r);
-    _PUSH(EmitIR(RegExpMatch, RRe, _POP()));
-  }
-  else {
-    not_support_op(Rec, reg_cfp, reg_pc, "opt_regexpmatch1");
-  }
+  VALUE obj = TOPN(0);
+  VALUE r   = GET_OPERAND(1);
+  VALUE params[] = {obj, r};
+  reg_t RRe  = EmitLoadConst(Rec, r);
+  reg_t Robj = _POP();
+  reg_t regs[] = {Robj, RRe};
+  rb_call_info_t ci;
+  ci.mid  = idEqTilde;
+  ci.flag = 0;
+  ci.orig_argc = ci.argc = 1;
+
+  EmitSpecialInst0(Rec, reg_pc, &ci, BIN(opt_regexpmatch1), params, regs);
 }
 
 static void record_opt_regexpmatch2(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
   VALUE obj2 = TOPN(1);
-  if (CLASS_OF(obj2) == rb_cString &&
-      BASIC_OP_UNREDEFINED_P(BOP_MATCH, STRING_REDEFINED_OP_FLAG)) {
-    reg_t Robj1, Robj2;
-    TakeStackSnapshot(Rec, reg_pc);
-    Robj2 = _POP();
-    Robj1 = _POP();
-    EmitIR(GuardMethodRedefine, reg_pc, rb_cString, BOP_MATCH);
-    EmitIR(GuardTypeString, reg_pc, Robj2);
-    _PUSH(EmitIR(RegExpMatch, Robj1, Robj2));
-  }
-  else {
-    not_support_op(Rec, reg_cfp, reg_pc, "opt_regexpmatch2");
-  }
+  VALUE obj1 = TOPN(0);
+  reg_t Robj1 = _POP();
+  reg_t Robj2 = _POP();
+  VALUE params[] = {obj2, obj1};
+  reg_t regs[] = {Robj2, Robj1};
+  rb_call_info_t ci;
+  ci.mid  = idEqTilde;
+  ci.flag = 0;
+  ci.orig_argc = ci.argc = 1;
+  EmitSpecialInst0(Rec, reg_pc, &ci, BIN(opt_regexpmatch2), params, regs);
+
 }
 
 static void record_opt_call_c_function(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)

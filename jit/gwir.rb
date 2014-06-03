@@ -14,11 +14,12 @@ class IRArgument
 end
 
 class OP
-    attr_accessor :name, :def, :use, :arg, :variadic
-    def initialize(name, has_def, has_use, arg)
+    attr_accessor :name, :def, :use, :arg, :variadic, :trans
+    def initialize(name, has_def, has_use, trans, arg)
         @name = name
         @def = has_def == ":def"
         @use = has_use == ":use"
+        @trans = trans == ":trans"
         @arg = []
         @variadic = false
         parse_arg(arg)
@@ -45,13 +46,15 @@ open(ARGV[0]) { |file|
 
     while l = file.gets
         if /^([a-zA-Z0-9_]+)/ =~ l
-            /^([a-zA-Z0-9_]+) *(:def)? *(:use)? *\((.*)\)$/ =~ l
+            /^([a-zA-Z0-9_]+) *(:def)? *(:use)? *(:trans)? *\((.*)\)$/ =~ l
             has_def = $2
             has_use = $3
-            arg  = $4
+            trans   = $4
+            arg  = $5
 
-            ir = OP.new($1, $2, $3, $4)
+            ir = OP.new($1, $2, $3, $4, $5)
             irs.push(ir)
+            ##
             puts "#define OPCODE_I#{ir.name}   #{i}\n"
             puts "typedef struct I#{ir.name} {\n"
             puts "  lir_compile_data_header_t base;"
@@ -73,7 +76,9 @@ open(ARGV[0]) { |file|
                 end
             end
             puts "} I" + ir.name + ";\n\n"
-            print "static int Emit_#{ir.name}(TraceRecorder *Rec"
+
+            ## Emit_???
+            print "static reg_t Emit_#{ir.name}(TraceRecorder *Rec"
             ir.arg.each{|e|
                 type = e.type
                 name = e.name
@@ -108,6 +113,16 @@ open(ARGV[0]) { |file|
             end
 
             puts "}\n"
+
+            ## EmitSpecialInst_???
+            if !ir.variadic and ir.trans
+                print "static reg_t EmitSpecialInst_#{ir.name}(TraceRecorder *Rec"
+                puts ", CALL_INFO ci, reg_t *regs)"
+                puts "{\n"
+                print "  return Emit_#{ir.name}(Rec"
+                puts ir.arg.length.times.map {|i| ", regs[#{i}]" }.join("") + ");"
+                puts "}\n"
+            end
 
             puts "#if DUMP_LIR > 0"
             print "static void Dump_#{ir.name}(lir_compile_data_header_t *Inst)\n"

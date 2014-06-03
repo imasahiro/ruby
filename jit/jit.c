@@ -28,6 +28,8 @@
 #define GWJIT_HOST 1
 #include "jit_context.h"
 
+VALUE rb_cMath = Qnil;
+
 typedef long reg_t;
 
 typedef VALUE *VALUEPtr;
@@ -170,6 +172,7 @@ void RJitGlobalInit()
 {
   global_rjit = RJitInit();
   Init_jit(); // load jit_prelude
+  rb_cMath = rb_singleton_class(rb_mMath);
 }
 
 void RJitGlobalDestruct()
@@ -489,9 +492,9 @@ static void dump_inst(rb_control_frame_t *reg_cfp, VALUE *reg_pc);
 static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc);
 static unsigned CountLIRInstSize(TraceRecorder *Rec);
 static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC);
-static int Emit_Exit(TraceRecorder *Rec, VALUEPtr Exit);
-static int Emit_Jump(TraceRecorder *Rec, VALUEPtr Exit);
-static int Emit_StackAdjust(TraceRecorder *Rec, int argc, RegPtr argv);
+static reg_t Emit_Exit(TraceRecorder *Rec, VALUEPtr Exit);
+static reg_t Emit_Jump(TraceRecorder *Rec, VALUEPtr Exit);
+static reg_t Emit_StackAdjust(TraceRecorder *Rec, int argc, RegPtr argv);
 
 static void TraceRecorderAppend(RJit *jit, TraceRecorder *Rec, Event *e)
 {

@@ -165,12 +165,13 @@ static void EmitSpecialInst1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VA
 {
   TakeStackSnapshot(Rec, reg_pc);
   CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
-  VALUE recv  = TOPN(1);
-  VALUE obj   = TOPN(0);
-  reg_t Robj  = _POP();
-  reg_t Rrecv = _POP();
-  VALUE params[] = {recv, obj};
-  reg_t regs[] = {Rrecv, Robj};
+  int i, argc = ci->argc + 1;
+  reg_t regs[argc];
+  VALUE params[argc];
+  for (i = 0; i < argc; i++) {
+    params[i] = TOPN(ci->argc - i);
+    regs[ci->argc - i] = _POP();
+  }
   EmitSpecialInst0(Rec, reg_pc, ci, opcode, params, regs);
 }
 

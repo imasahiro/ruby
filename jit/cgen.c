@@ -84,10 +84,6 @@ static void gwjit_context_init()
     assert(((VALUE*)&jit_host_context)[i] != 0 &&
            "some field of jit_host_context is not initialized");
   }
-  // supress warnings
-  (void) insn_name;
-  (void) insn_op_types;
-  (void) insn_op_type;
 }
 
 /* copied from vm.c */

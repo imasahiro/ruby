@@ -18,7 +18,7 @@
 #include "internal.h"
 #include "iseq.h"
 #include "insns.inc"
-#include "insns_info.inc"
+#include "vmrecord.inc"
 
 #include "jit_prelude.c"
 

@@ -97,7 +97,7 @@ static lir_compile_data_header_t *FindLIRById(TraceRecorder *Rec, reg_t Reg)
   while(block != NULL) {
     unsigned i = 0;
     for (i = 0; i < block->size; i++) {
-      if (block->Insts[i]->id == (unsigned) Reg) {
+      if (block->Insts[i]->id == Reg) {
         return block->Insts[i];
       }
     }

@@ -61,7 +61,7 @@ class RubyVM
       @optimized << insn
     end
 
-    def sp_increase_c_expr
+    def sp_increase_c_expr(mode = :default)
       if(pops.any?{|t, v| v == '...'} ||
          rets.any?{|t, v| v == '...'})
         # user definition
@@ -71,7 +71,11 @@ class RubyVM
         @opes.each_with_index{|(t, v), i|
           if (t == 'rb_num_t' && ((re = /\b#{v}\b/n) =~ @sp_inc)) ||
              (@defopes.any?{|t, val| re =~ val})
-            ret << "        int #{v} = FIX2INT(opes[#{i}]);\n"
+            if mode == :default
+              ret << "        int #{v} = FIX2INT(opes[#{i}]);\n"
+            else
+              ret << "        int #{v} = (int)(opes[#{i}]);\n"
+            end
           elsif (t == 'CALL_INFO' && ((re = /\b#{v}\b/n) =~ @sp_inc))
             ret << "        CALL_INFO #{v} = (CALL_INFO)(opes[#{i}]);\n"
           end
@@ -1046,21 +1050,22 @@ class RubyVM
   # vmrecord.inc
   class VMRecordGenerator < SourceCodeGenerator
     def generate
-      records = build_string do
-        @insns.each{|insn|
-          commit <<-EOS
-          static void record_#{insn.name}(rb_thread_t *th, rb_control_frame_t *reg_cfp, VALUE *reg_pc) {
-            not_support_op("#{insn.name}");
-          }
-          EOS
-        }
-      end
+      operands_num_info = ''
+      operands_macro    = ''
+      stack_increase    = ''
 
-      record_funcs = build_string do
-        @insns.each{|insn|
-          commit " record_%s," % [insn.name]
+      @insns.each{|insn|
+        opes = insn.opes
+        num = opes.size + 1
+        operands_num_info << "  #{num},\n"
+        operands_macro << "OP(#{insn.name})\\\n"
+
+        stack_increase << <<-EOS
+        case BIN(#{insn.name}):{
+          #{insn.sp_increase_c_expr(:record)}
         }
-      end
+        EOS
+      }
 
       ERB.new(vpath.read('template/vmrecord.inc.tmpl')).result(binding)
     end

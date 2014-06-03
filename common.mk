@@ -859,7 +859,8 @@ jit_prelude.c: $(srcdir)/tool/compile_prelude.rb $(srcdir)/jit/jit_prelude.rb
 
 jit.$(OBJEXT): {$(VPATH)}jit/jit.c {$(VPATH)}jit/kmap.c {$(VPATH)}jit/jit_opts.h \
 	{$(VPATH)}jit/ir.c {$(VPATH)}jit/record.c  {$(VPATH)}jit/snapshot.c \
-	{$(VPATH)}jit/cgen.c {$(VPATH)}gwir.c {$(VPATH)}jit_prelude.c
+	{$(VPATH)}jit/cgen.c {$(VPATH)}gwir.c {$(VPATH)}jit_prelude.c \
+	{$(VPATH)}vmrecord.inc
 	@$(ECHO) compiling $<
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c $<
 
@@ -924,6 +925,8 @@ INSNS2VMOPT = --srcdir="$(srcdir)"
 {$(VPATH)}vmtc.inc: $(srcdir)/template/vmtc.inc.tmpl
 
 {$(VPATH)}vm.inc: $(srcdir)/template/vm.inc.tmpl
+
+{$(VPATH)}vmrecord.inc: $(srcdir)/template/vmrecord.inc.tmpl
 
 srcs: {$(VPATH)}parse.c {$(VPATH)}lex.c {$(VPATH)}newline.c {$(VPATH)}id.c srcs-ext srcs-enc
 

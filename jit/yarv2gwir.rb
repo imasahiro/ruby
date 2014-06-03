@@ -44,7 +44,7 @@ DATA = [
     ["MathSin",   "opt_send_simple", "sin",   [:Math, :_]],
     ["MathCos",   "opt_send_simple", "cos",   [:Math, :_]],
     ["MathTan",   "opt_send_simple", "tan",   [:Math, :_]],
-    ["MathExp",   "opt_send_simple", "expr",  [:Math, :_]],
+    ["MathExp",   "opt_send_simple", "exp",   [:Math, :_]],
     ["MathSqrt",  "opt_send_simple", "sqrt",  [:Math, :_]],
     ["MathLog10", "opt_send_simple", "log10", [:Math, :_]],
     ["MathLog2",  "opt_send_simple", "log2",  [:Math, :_]],
@@ -145,7 +145,7 @@ class Mid < Rule
         return "idSize"      if sym == "size"
         return "idEmptyP"    if sym == "empty?"
         return "idSucc"      if sym == "succ"
-        return "idEqTilde"   if sym == "~="
+        return "idEqTilde"   if sym == "=~"
         return "rb_intern(\"#{sym}\")"
     end
 

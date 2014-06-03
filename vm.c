@@ -1172,6 +1172,9 @@ rb_vm_check_redefinition_opt_method(const rb_method_entry_t *me, VALUE klass)
 
 	    ruby_vm_redefined_flag[bop] |= flag;
 	}
+	else {
+	    rb_jit_check_redefinition_opt_method(me, klass);
+	}
     }
 }
 
@@ -1814,7 +1817,7 @@ ruby_vm_destruct(rb_vm_t *vm)
 	    rb_objspace_free(objspace);
 	}
 #endif
-	RJitGlobalDestruct();
+	rb_jit_global_destruct();
 	/* after freeing objspace, you *can't* use ruby_xfree() */
 	ruby_mimfree(vm);
 	ruby_current_vm = 0;
@@ -2749,7 +2752,7 @@ Init_VM(void)
     vm_init_redefined_flag();
 
     /* JIT bootstrap */
-    RJitGlobalInit();
+    rb_jit_global_init();
 
     /* vm_backtrace.c */
     Init_vm_backtrace();

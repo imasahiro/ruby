@@ -93,12 +93,73 @@ enum JIT_BOP {
   JIT_BOP_TAN,
   JIT_BOP_LOG2,
   JIT_BOP_LOG10,
-  JIT_BOP_EXPR,
+  JIT_BOP_EXP,
   JIT_BOP_SQRT,
   JIT_BOP_EXT_LAST_
 };
 
-short jit_vm_redefined_flag[JIT_BOP_EXT_LAST_ - BOP_LAST_] = {};
+short jit_vm_redefined_flag[JIT_BOP_EXT_LAST_ - BOP_LAST_];
+
+static st_table *jit_opt_method_table = 0;
+
+static int
+jit_redefinition_check_flag(VALUE klass)
+{
+    if (klass == rb_cFixnum) return FIXNUM_REDEFINED_OP_FLAG;
+    if (klass == rb_cMath)   return MATH_REDEFINED_OP_FLAG;
+    return 0;
+}
+
+void rb_jit_check_redefinition_opt_method(const rb_method_entry_t *me, VALUE klass)
+{
+  st_data_t bop;
+  if (st_lookup(jit_opt_method_table, (st_data_t)me, &bop)) {
+    int flag = jit_redefinition_check_flag(klass);
+    assert(flag != 0);
+    jit_vm_redefined_flag[bop - JIT_BOP_LAST_] |= flag;
+  }
+}
+
+/* copied from vm.c */
+static void add_opt_method(VALUE klass, ID mid, VALUE bop)
+{
+  rb_method_entry_t *me = rb_method_entry_at(klass, mid);
+
+  if (me && me->def &&
+      me->def->type == VM_METHOD_TYPE_CFUNC) {
+    st_insert(jit_opt_method_table, (st_data_t)me, (st_data_t)bop);
+  }
+  else {
+    rb_bug("undefined optimized method: %s", rb_id2name(mid));
+  }
+}
+
+#define DEF(k, mid, bop) do {\
+  jit_vm_redefined_flag[bop - JIT_BOP_LAST_] = 0;\
+  add_opt_method(rb_c##k, rb_intern(mid), bop);\
+} while (0)
+
+static void rb_jit_init_redefined_flag(void)
+{
+  ID mid;
+  VALUE bop;
+
+  jit_opt_method_table = st_init_numtable();
+  DEF(Fixnum, "&",  JIT_BOP_AND);
+  DEF(Fixnum, "|",  JIT_BOP_OR);
+  DEF(Fixnum, "^",  JIT_BOP_XOR);
+  DEF(Fixnum, ">>", JIT_BOP_RSHIFT);
+  DEF(Fixnum, "~",  JIT_BOP_INV);
+  DEF(Math, "sin"  , JIT_BOP_SIN);
+  DEF(Math, "cos"  , JIT_BOP_COS);
+  DEF(Math, "tan"  , JIT_BOP_TAN);
+  DEF(Math, "exp" ,  JIT_BOP_EXP);
+  DEF(Math, "sqrt" , JIT_BOP_SQRT);
+  DEF(Math, "log10", JIT_BOP_LOG10);
+  DEF(Math, "log2" , JIT_BOP_LOG2);
+}
+#undef DEF
+
 
 static int
 check_cfunc(const rb_method_entry_t *me, VALUE (*func)())
@@ -185,7 +246,7 @@ static int RJitModeIs(RJit *Jit, TraceMode mode)
   return (Jit->mode_ & mode) == mode;
 }
 
-RJit *RJitInit()
+static RJit *RJitInit()
 {
   RJit *Jit = (RJit *) malloc(sizeof(*Jit));
   Jit->Rec = TraceRecorderNew(Jit);
@@ -211,14 +272,15 @@ void RJitDelete(RJit *Jit)
 }
 
 static RJit *global_rjit = NULL;
-void RJitGlobalInit()
+void rb_jit_global_init()
 {
   global_rjit = RJitInit();
-  Init_jit(); // load jit_prelude
   rb_cMath = rb_singleton_class(rb_mMath);
+  rb_jit_init_redefined_flag();
+  Init_jit(); // load jit_prelude
 }
 
-void RJitGlobalDestruct()
+void rb_jit_global_destruct()
 {
   RJitDelete(global_rjit);
   global_rjit = NULL;
@@ -738,7 +800,7 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
   return e->pc;
 }
 
-VALUE *jit_trace(rb_thread_t *th, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
+VALUE *rb_jit_trace(rb_thread_t *th, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
   Event ebuf;
   Event *e = EventInit(&ebuf, global_rjit, reg_cfp, reg_pc);

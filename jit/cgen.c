@@ -629,7 +629,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
       IGuardTypeFloat *ir = (IGuardTypeFloat *) Inst;
       long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
       cgen_printf(gen,
-                  "if(!(RBASIC_CLASS(v%ld) == jit_context->cFloat)) {\n"
+                  "if(!(RB_FLOAT_TYPE_P(v%ld))) {\n"
                   "  goto L_exit%ld;\n"
                   "}\n", ir->R, ExitBlockId);
       break;

@@ -221,6 +221,9 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst, size_t i
   buf = CreateInst(Rec, inst, inst_size);
   bb->Insts[bb->size] = buf;
   bb->size += 1;
+#if DUMP_LIR > 1
+  dump_lir_inst(buf);
+#endif
   return buf->id;
 }
 

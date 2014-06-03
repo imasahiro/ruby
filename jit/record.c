@@ -144,7 +144,7 @@ static reg_t EmitSpecialInst_SetPropertyName(TraceRecorder *Rec, CALL_INFO ci, r
 
 #define Unredefined(...)      (1)
 #define GuardUnredefined(...) (1)
-static reg_t EmitSpecialInst(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci, int opcode, VALUE* params, reg_t* regs)
+static reg_t EmitSpecialInst(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci, enum ruby_vminsn_type opcode, VALUE* params, reg_t* regs)
 {
 #include "yarv2gwir.c"
   return -1;
@@ -156,7 +156,7 @@ static void EmitSpecialInst0(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci, int op
   if ((Rval = EmitSpecialInst(Rec, pc, ci, opcode, params, regs)) == -1) {
     vm_search_method(ci, params[0]);
     ci = CloneInlineCache(&Rec->CacheMng, ci);
-    EmitIR(GuardMethodCache, pc, params[0], ci);
+    EmitIR(GuardMethodCache, pc, regs[0], ci);
     Rval = EmitIR(InvokeMethod, ci, 2, regs);
   }
   _PUSH(Rval);

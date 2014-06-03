@@ -159,7 +159,7 @@ class Argc < Rule
         super("", val)
     end
     def to_s
-        "ci->argc == #{@val}"
+        "ci->argc == #{@val - 1}"
     end
 end
 
@@ -185,7 +185,9 @@ class Type < Rule
         if @type == :Fixnum
             return "FIXNUM_P(#{p})"
         elsif @type == :Float
-            return "FLONUM_P(#{p})"
+            s  = "(FLONUM_P(#{p}) && (is_flonum#{val} = 1)) ||"
+            s += "((!SPECIAL_CONST_P(#{p}) && RBASIC_CLASS(#{p}) == rb_cFloat))"
+            return s;
         elsif @type == :_
             return "1/*typeof #{p} is Any*/"
         else
@@ -197,7 +199,9 @@ class Type < Rule
         if @type == :Fixnum
             return "Emit_GuardTypeFixnum(Rec, pc, #{p})"
         elsif @type == :Float
-            return "Emit_GuardTypeFloat(Rec, pc, #{p})"
+            s = "if(is_flonum#{val}) {"
+            s += " Emit_GuardTypeFlonum(Rec, pc, #{p}); }"
+            s += "else { Emit_GuardTypeFloat(Rec, pc, #{p}); }"
         elsif @type == :_
             return ""
         else
@@ -213,9 +217,9 @@ def indent(i)
     i.times { print "  " }
 end
 
-def op(name, arg)
+def op(idx, name, arg)
     i = 0
-    puts "if ("
+    puts "if ( // rule#{idx} #{name}"
     puts arg.map {|a|
         "  (#{a.to_s})"
     }.join(" &&\n")
@@ -259,7 +263,20 @@ def type(idx, type, guard = :default)
     Type.new(idx, type, guard)
 end
 
+max_param_size = 0
+
 DATA.each { |op|
+    arg    = op[3]
+    if arg.length > max_param_size
+        max_param_size = arg.length
+    end
+}
+
+max_param_size.times {|i|
+    puts "int is_flonum#{i} = 0;"
+}
+
+DATA.each.with_index { |op, i|
     opname = op[0]
     yarvop = op[1]
     mname  = op[2]
@@ -284,5 +301,5 @@ DATA.each { |op|
             param << type(i, v)
         end
     }
-    op(opname, param)
+    op(i, opname, param)
 }

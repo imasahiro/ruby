@@ -1,13 +1,13 @@
 class Integer
-    def times &block
-        return to_enum :times unless block_given?
-        i = 0
-        while i < self
-            yield i
-            i += 1
-        end
-        self
+  def times &block
+    return to_enum :times unless block_given?
+    i = 0
+    while i < self
+      yield i
+      i += 1
     end
+    self
+  end
 end
 
 class Range

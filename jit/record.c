@@ -489,7 +489,17 @@ static void record_tostring(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VAL
 
 static void record_toregexp(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  not_support_op(Rec, reg_cfp, reg_pc, "toregexp");
+  rb_num_t i;
+  rb_num_t cnt = (rb_num_t)GET_OPERAND(2);
+  rb_num_t opt = (rb_num_t)GET_OPERAND(1);
+  reg_t regs[cnt];
+  reg_t Rary;
+  for (i = 0; i < cnt; i++) {
+    regs[cnt - i] = _POP();
+  }
+  Rary = EmitIR(AllocArray, (int) cnt, regs);
+  assert(0 && "need to test");
+  _PUSH(EmitIR(AllocRegexFromArray, Rary, (int) opt));
 }
 
 static void record_newarray(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
@@ -584,11 +594,10 @@ static void record_reput(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE 
 
 static void record_topn(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-  not_support_op(Rec, reg_cfp, reg_pc, "topn");
-  //rb_num_t n = (rb_num_t)GET_OPERAND(1);
-  //asm volatile("int3"); // need test
-  //reg_t Rval = _TOPN(n);
-  //_PUSH(Rval);
+  rb_num_t n = (rb_num_t)GET_OPERAND(1);
+  assert(0 && "need to test");
+  reg_t Rval = _TOPN(n);
+  _PUSH(Rval);
 }
 
 static void record_setn(TraceRecorder *Rec, rb_control_frame_t *reg_cfp, VALUE *reg_pc)

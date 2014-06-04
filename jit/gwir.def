@@ -99,6 +99,7 @@ AllocArray  :def      (argc:int, argv:reg_t[])
 AllocHash   :def      (argc:int, argv:reg_t[])
 AllocString :def :use (OrigStr:reg_t)
 AllocRange  :def :use (Low:reg_t, High:reg_t, Flag:int)
+AllocRegexFromArray :def :use (Ary:reg_t, opt:int)
 
 # load/store global variable
 GetGlobal :def :use (Entry:reg_t)

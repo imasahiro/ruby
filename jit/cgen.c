@@ -1294,6 +1294,12 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs
 
       break;
     }
+    case OPCODE_IAllocRegexFromArray : {
+      //IAllocRegexFromArray *ir = (IAllocRegexFromArray *) Inst;
+      assert(0 && "not implemented");
+      break;
+    }
+
     case OPCODE_IGetGlobal : {
       IGetGlobal *ir = (IGetGlobal *) Inst;
       cgen_printf(gen,

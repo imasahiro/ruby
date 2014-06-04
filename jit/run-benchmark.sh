@@ -54,9 +54,9 @@ LIST="$LIST benchmark/bm_vm2_regexp.rb"
 LIST="$LIST benchmark/bm_app_strconcat.rb"
 LIST="$LIST benchmark/bm_so_random.rb"
 
-#LIST="$LIST benchmark-jit/bm_vm1_unless.rb"
-#LIST="$LIST benchmark-jit/bm_vm2_newarray.rb"
-#LIST="$LIST benchmark-jit/bm_vm2_newhash.rb"
+#LIST="$LIST test-jit/bm_vm1_unless.rb"
+#LIST="$LIST test-jit/bm_vm2_newarray.rb"
+#LIST="$LIST test-jit/bm_vm2_newhash.rb"
 
 make -j8 -C build
 ruby ./jit/make_pch.rb

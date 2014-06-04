@@ -360,7 +360,7 @@ static void *cgen_get_function(CGen *gen, const char *fname)
 
 static long GetBlockId(hashmap_t *SideExitBBs, VALUE *pc)
 {
-  long val = (long) hashmap_get(SideExitBBs, pc);
+  long val = (long) hashmap_get(SideExitBBs, (hashmap_data_t) pc);
   assert(val != 0);
   return val >> 1;
 }
@@ -392,9 +392,9 @@ static void PrepareSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBB
   long j = 1;
   hashmap_iterator_t itr = {0, 0};
   while(hashmap_next(&TraceRecorderGetTrace(Rec)->SideExit, &itr)) {
-    VALUE *pc       = itr.entry->k;
+    VALUE *pc       = (VALUE *) itr.entry->key;
     StackMap *stack = GetStackMap(Rec, pc);
-    hashmap_set(SideExitBBs, pc, (struct Trace *)(j << 1));
+    hashmap_set(SideExitBBs, (hashmap_data_t) pc, (j << 1));
     cgen_printf(gen,
                 "static TraceExitStatus gwjit_side_exit_%ld("
                 "rb_thread_t *th, "
@@ -422,8 +422,8 @@ static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
   int i, j;
   hashmap_iterator_t itr = {0, 0};
   while(hashmap_next(SideExitBBs, &itr)) {
-    VALUE *pc = itr.entry->k;
-    long BlockId = ((long) itr.entry->v) >> 1;
+    VALUE *pc = (VALUE *) itr.entry->key;
+    long BlockId = itr.entry->val >> 1;
     StackMap *stack = GetStackMap(Rec, pc);
 
     cgen_printf(gen, "L_exit%ld:;\n", BlockId);

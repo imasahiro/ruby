@@ -254,7 +254,7 @@ static void dump_side_exit(TraceRecorder *Rec)
   int i;
   hashmap_iterator_t itr = {0, 0};
   while(hashmap_next(&TraceRecorderGetTrace(Rec)->SideExit, &itr)) {
-    VALUE *pc = itr.entry->k;
+    VALUE *pc = (VALUE *) itr.entry->key;
     StackMap *stack = GetStackMap(Rec, pc);
     fprintf(stderr, "side exit(%d): pc=%p: %s ",
             stack->size, pc, TraceStatusToStr(stack->flag));

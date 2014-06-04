@@ -24,7 +24,7 @@
 
 #include "jit.h"
 #include "jit_opts.h"
-#include "kmap.c"
+#include "hashmap.c"
 #define GWJIT_HOST 1
 #include "jit_context.h"
 
@@ -264,7 +264,7 @@ static void RJitSetTrace(RJit *Jit, TraceMode mode, Trace *trace)
 void RJitDelete(RJit *Jit)
 {
   TraceRecorderDelete(Jit->Rec);
-  hashmap_dispose(&Jit->Traces, (void (*)(void*))TraceFree);
+  hashmap_dispose(&Jit->Traces, (hashmap_entry_destructor_t)TraceFree);
   free(Jit);
 }
 
@@ -296,9 +296,9 @@ typedef struct Stackmap {
 } StackMap;
 
 static StackMap *GetStackMap(TraceRecorder *Rec, VALUE *pc);
-static void DeleteStackMap(void *map)
+static void DeleteStackMap(StackMap *map)
 {
-  free(map);
+  free((void *)map);
 }
 
 // trace
@@ -329,14 +329,14 @@ static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
 static void TraceReset(Trace *trace)
 {
   if (hashmap_size(&trace->SideExit) > 0) {
-    hashmap_dispose(&trace->SideExit, DeleteStackMap);
+    hashmap_dispose(&trace->SideExit, (hashmap_entry_destructor_t) DeleteStackMap);
     hashmap_init(&trace->SideExit, 1);
   }
 }
 
 static void TraceFree(Trace *trace)
 {
-  hashmap_dispose(&trace->SideExit, DeleteStackMap);
+  hashmap_dispose(&trace->SideExit, (hashmap_entry_destructor_t) DeleteStackMap);
   free(trace);
 }
 
@@ -347,14 +347,13 @@ static void TraceUpdateLastInst(Trace *trace, VALUE *pc)
 
 static Trace *FindTrace(RJit *jit, VALUE *pc)
 {
-  void *trace = hashmap_get(&jit->Traces, pc);
-  return (Trace *) trace;
+  return (Trace *) hashmap_get(&jit->Traces, (hashmap_data_t) pc);
 }
 
 static Trace *AddTrace(RJit *jit, rb_control_frame_t *reg_cfp, VALUE *pc, Trace *parent)
 {
   Trace *trace = TraceNew(GET_ISEQ(), pc, parent);
-  hashmap_set(&jit->Traces, pc, trace);
+  hashmap_set(&jit->Traces, (hashmap_data_t) pc, (hashmap_data_t) trace);
   return trace;
 }
 

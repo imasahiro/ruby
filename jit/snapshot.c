@@ -14,11 +14,11 @@ static StackMap *GetStackMap(TraceRecorder *Rec, VALUE *pc)
     return (StackMap *)hashmap_get(map, (hashmap_data_t)pc);
 }
 
-static void AddStackMap(TraceRecorder *Rec, VALUE *pc, StackMap *map)
+static void AddStackMap(TraceRecorder *Rec, VALUE *pc, StackMap *stack)
 {
     if (RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
         hashmap_t *map = &TraceRecorderGetTrace(Rec)->SideExit;
-        hashmap_set(map, (hashmap_data_t)pc, (hashmap_data_t)map);
+        hashmap_set(map, (hashmap_data_t)pc, (hashmap_data_t)stack);
     }
 }
 

@@ -197,13 +197,17 @@ typedef enum trace_error_status {
     TRACE_ERROR_END
 } TraceErrorStatus;
 
-static const char *trace_error_message[]
-    = { "ok", "invoking native method", "throw exception",
-        "not supported bytecode", "this trace return into native method",
-        "register stack underflow",
-        "this instruction is already recorded on trace"
-        "trace buffer is full"
-        "" };
+static const char *trace_error_message[] = {
+    "ok",
+    "invoking native method",
+    "throw exception",
+    "not supported bytecode",
+    "this trace return into native method",
+    "register stack underflow",
+    "this instruction is already recorded on trace",
+    "trace buffer is full",
+    ""
+};
 
 typedef struct Event Event;
 typedef struct Trace Trace;

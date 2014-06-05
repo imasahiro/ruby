@@ -1355,23 +1355,13 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "v%ld = Qnil;\n", Id);
         break;
     }
-    case OPCODE_ILoadConstObject: {
+    case OPCODE_ILoadConstObject:
+    case OPCODE_ILoadConstBoolean:
+    case OPCODE_ILoadConstFixnum:
+    case OPCODE_ILoadConstFloat:
+    case OPCODE_ILoadConstString:
+    case OPCODE_ILoadConstRegexp: {
         ILoadConstObject *ir = (ILoadConstObject *)Inst;
-        cgen_printf(gen, "v%ld = (VALUE) 0x%lx;\n", Id, ir->Val);
-        break;
-    }
-    case OPCODE_ILoadConstFixnum: {
-        ILoadConstFixnum *ir = (ILoadConstFixnum *)Inst;
-        cgen_printf(gen, "v%ld = (VALUE) 0x%lx;\n", Id, ir->Val);
-        break;
-    }
-    case OPCODE_ILoadConstFloat: {
-        ILoadConstFloat *ir = (ILoadConstFloat *)Inst;
-        cgen_printf(gen, "v%ld = (VALUE) 0x%lx;\n", Id, ir->Val);
-        break;
-    }
-    case OPCODE_ILoadConstString: {
-        ILoadConstString *ir = (ILoadConstString *)Inst;
         cgen_printf(gen, "v%ld = (VALUE) 0x%lx;\n", Id, ir->Val);
         break;
     }

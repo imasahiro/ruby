@@ -126,51 +126,100 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
 
 #include "gwir.c"
 
+static int elimnate_guard(TraceRecorder *Rec, lir_compile_data_header_t *inst)
+{
+    /* Remove guard that always true
+     * If we think following code, L2 is always true. So we can remove L2.
+     * L1 = LoadConstFixnum 10
+     * L2 = GuardTypeFixnum L1 exit_pc
+     */
+    IGuardTypeFixnum *guard = (IGuardTypeFixnum *) inst;
+    lir_compile_data_header_t *src = FindLIRById(Rec, guard->R);
+
+    if (src == NULL) {
+        return 0;
+    }
+
+#define RETURN_IF(INST1, OP1, INST2, OP2) \
+    if ((INST1)->opcode == OPCODE_I##OP1 && (INST2)->opcode == OPCODE_I##OP2) {\
+        return 1;\
+    }
+
+
+    RETURN_IF(inst, GuardTypeFixnum, src, LoadConstFixnum);
+    RETURN_IF(inst, GuardTypeFloat,  src, LoadConstFloat);
+    RETURN_IF(inst, GuardTypeRegexp, src, LoadConstRegexp);
+
+    if (inst->opcode == OPCODE_IGuardTypeFlonum) {
+        if (src->opcode == OPCODE_ILoadConstFloat) {
+            if (FLONUM_P(((ILoadConstFloat*)src)->Val)) {
+                return 1;
+            }
+        }
+    }
+
+    if (inst->opcode == OPCODE_IGuardTypeArray) {
+        if (src->opcode == OPCODE_IAllocArray) {
+            return 1;
+        }
+    }
+
+    if (inst->opcode == OPCODE_IGuardTypeString) {
+        if (src->opcode == OPCODE_ILoadConstString) {
+            return 1;
+        }
+        if (src->opcode == OPCODE_IAllocString) {
+            return 1;
+        }
+    }
+
+    if (inst->opcode == OPCODE_IGuardTypeSpecialConst) {
+        switch (src->opcode) {
+        case OPCODE_ILoadConstNil     :
+        case OPCODE_ILoadConstBoolean :
+        case OPCODE_ILoadConstFixnum  :
+        case OPCODE_ILoadConstFloat   :
+        case OPCODE_IGuardTypeNil     :
+        case OPCODE_IGuardTypeNonNil  :
+            return 1;
+        default:
+            break;
+        }
+    }
+
+    return 0;
+}
+
 static int peephole(TraceRecorder *Rec, lir_compile_data_header_t *inst)
 {
-    if (inst->opcode == OPCODE_IGuardTypeFixnum) {
-        IGuardTypeFixnum *ir = (IGuardTypeFixnum *)inst;
-        lir_compile_data_header_t *src = FindLIRById(Rec, ir->R);
-        if (src && src->opcode == OPCODE_ILoadConstFixnum) {
+    switch (inst->opcode) {
+    case OPCODE_IGuardTypeFixnum      :
+    case OPCODE_IGuardTypeFloat       :
+    case OPCODE_IGuardTypeFlonum      :
+    case OPCODE_IGuardTypeSpecialConst:
+    case OPCODE_IGuardTypeArray       :
+    case OPCODE_IGuardTypeString      :
+    case OPCODE_IGuardTypeHash        :
+    case OPCODE_IGuardTypeRegexp      :
+    case OPCODE_IGuardTypeTime        :
+    case OPCODE_IGuardTypeMath        :
+    case OPCODE_IGuardTypeObject      :
+    case OPCODE_IGuardTypeNil         :
+    case OPCODE_IGuardTypeNonNil      :
+        if (elimnate_guard(Rec, inst)) {
             return -1;
         }
+    default:
+        break;
     }
-
-    if (inst->opcode == OPCODE_IGuardTypeFlonum
-        || inst->opcode == OPCODE_IGuardTypeFloat) {
-        IGuardTypeFloat *ir = (IGuardTypeFloat *)inst;
-        lir_compile_data_header_t *src = FindLIRById(Rec, ir->R);
-        if (src && src->opcode == OPCODE_ILoadConstFloat) {
-            return -1;
-        }
-    }
-
-    //  if (inst->opcode == OPCODE_IGuardTypeSpecialConst) {
-    //    IGuardTypeFloat *ir = (IGuardTypeFloat *) inst;
-    //    lir_compile_data_header_t *src = FindLIRById(Rec, ir->R);
-    //    if (src && src->opcode == OPCODE_LoadConstFloat) {
-    //      return -1;
-    //    }
-    //  }
-    //
-    //  if (inst->opcode == OPCODE_IGuardType) {
-    //    IGuardType *ir = (IGuardType *) inst;
-    //    lir_compile_data_header_t *src = FindLIRById(Rec, ir->Reg);
-    //    if (src && src->opcode == OPCODE_ILoadObject) {
-    //      ILoadObject *lo = (ILoadObject *) src;
-    //      if (ir->klass == RBASIC_CLASS(lo->O)) {
-    //        return -1;
-    //      }
-    //    }
-    //  }
     return 0;
 }
 
 static int lir_inst_define_value(int opcode)
 {
 #define DEF_IR(OPNAME)     \
-    case OPCODE_I##OPNAME: \
-        return GWIR_USE_##OPNAME;
+case OPCODE_I##OPNAME: \
+                       return GWIR_USE_##OPNAME;
     switch (opcode) {
         GWIR_EACH(DEF_IR);
     default:
@@ -185,8 +234,8 @@ static void dump_lir_inst(lir_compile_data_header_t *Inst);
 #endif /* DUMP_LIR > 0*/
 
 static lir_compile_data_header_t *CreateInst(TraceRecorder *Rec,
-                                             lir_compile_data_header_t *inst,
-                                             size_t inst_size)
+        lir_compile_data_header_t *inst,
+        size_t inst_size)
 {
     lir_compile_data_header_t *buf = lir_alloc(Rec, inst_size);
     int newid = buf->id;
@@ -197,7 +246,7 @@ static lir_compile_data_header_t *CreateInst(TraceRecorder *Rec,
 }
 
 static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
-                   size_t inst_size)
+        size_t inst_size)
 {
     lir_compile_data_header_t *buf;
     int opt;
@@ -214,8 +263,8 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
     if (bb->size == bb->capacity) {
         unsigned newsize = bb->capacity * 2;
         bb->Insts = (lir_compile_data_header_t **)lir_realloc(
-            Rec, bb->Insts, sizeof(lir_compile_data_header_t *) * bb->capacity,
-            sizeof(lir_compile_data_header_t *) * newsize);
+                Rec, bb->Insts, sizeof(lir_compile_data_header_t *) * bb->capacity,
+                sizeof(lir_compile_data_header_t *) * newsize);
         bb->capacity = newsize;
     }
 
@@ -232,9 +281,9 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
 static void dump_lir_inst(lir_compile_data_header_t *Inst)
 {
 #define DUMP_IR(OPNAME)      \
-    case OPCODE_I##OPNAME:   \
-        Dump_##OPNAME(Inst); \
-        break;
+case OPCODE_I##OPNAME:   \
+                         Dump_##OPNAME(Inst); \
+    break;
     switch (Inst->opcode) {
         GWIR_EACH(DUMP_IR);
     default:

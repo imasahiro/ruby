@@ -91,7 +91,7 @@ HashGet    :def :use :trans (Recv:reg_t, Index:reg_t)
 HashSet    :def :use :trans (Recv:reg_t, Index:reg_t, Val:reg_t)
 
 # regexp operator
-RegExpMatch :def :use :trans (Re:reg_t, Str:reg_t)
+RegExpMatch :def :use :trans (Str:reg_t, Re:reg_t)
 
 # alloc instruction
 AllocObject :def      (Klass:reg_t, argc:int, argv:reg_t[])
@@ -112,9 +112,11 @@ SetPropertyName :def :use (Recv:reg_t, Index:long, Val:reg_t)
 # constant object instruction
 LoadConstNil     :def ()
 LoadConstObject  :def (Val:VALUE)
+LoadConstBoolean :def (Val:VALUE)
 LoadConstFixnum  :def (Val:VALUE)
 LoadConstFloat   :def (Val:VALUE)
 LoadConstString  :def (Val:VALUE)
+LoadConstRegexp  :def (Val:VALUE)
 
 # load special object instruction
 LoadSelf        :def ()

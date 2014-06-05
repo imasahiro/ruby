@@ -70,7 +70,7 @@ DATA = [
   ["HashGet",    "opt_aref|opt_aref_with", "[]",  [:Hash, :_]],
   ["HashSet",    "opt_aset|opt_aset_with", "[]=", [:Hash, :_, :_]],
 
-  ["RegExpMatch", "opt_regexpmatch1|opt_regexpmatch2", "=~", [:Regexp, :String]],
+  ["RegExpMatch", "opt_regexpmatch1|opt_regexpmatch2", "=~", [:String, :Regexp]],
 
   ["TimeSucc",    "opt_succ", "succ", [:Time]],
 

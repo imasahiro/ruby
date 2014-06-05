@@ -94,14 +94,26 @@ static reg_t EmitConverter(TraceRecorder *Rec, VALUE val, reg_t Rval,
 
 static reg_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
 {
-    reg_t Rval;
-    if (FIXNUM_P(val)) {
+    reg_t Rval = -1;
+    if (NIL_P(val)) {
+        Rval = EmitIR(LoadConstNil);
+    } else if (val == Qtrue || val == Qfalse) {
+        Rval = EmitIR(LoadConstBoolean, val);
+    } else if (FIXNUM_P(val)) {
         Rval = EmitIR(LoadConstFixnum, val);
     } else if (FLONUM_P(val)) {
         Rval = EmitIR(LoadConstFloat, val);
-    } else if (!SPECIAL_CONST_P(val) && RBASIC_CLASS(val) == rb_cString) {
-        Rval = EmitIR(LoadConstString, val);
-    } else {
+    } else if (!SPECIAL_CONST_P(val)) {
+        if (RBASIC_CLASS(val) == rb_cString) {
+            Rval = EmitIR(LoadConstString, val);
+        } else if (RBASIC_CLASS(val) == rb_cString) {
+            Rval = EmitIR(LoadConstString, val);
+        } else if (RBASIC_CLASS(val) == rb_cRegexp) {
+            Rval = EmitIR(LoadConstRegexp, val);
+        }
+    }
+
+    if(Rval == -1) {
         Rval = EmitIR(LoadConstObject, val);
     }
     return Rval;

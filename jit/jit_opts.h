@@ -40,6 +40,8 @@
 #define GWIT_CGEN_DBG_LEVEL "0"
 #endif
 
+#define GWIT_LOG_SIDE_EXIT  1 /* 0:disable, 1: emit log if side exit occured */
+
 /* Initial buffer size of lir memory allocator */
 #define LIR_COMPILE_DATA_BUFF_SIZE (512)
 

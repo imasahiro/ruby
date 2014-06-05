@@ -763,6 +763,9 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
     if (trace && trace->Code) {
         VALUE *exit_pc = NULL;
         TraceExitStatus exit_status = Invoke(th, trace, e, &exit_pc);
+#if GWIT_LOG_SIDE_EXIT > 0
+        fprintf(stderr, "trace for %p is exit from %p\n", e->pc, exit_pc);
+#endif
         switch (exit_status) {
         case TRACE_EXIT_SIDE_EXIT:
             trace = GetOrAddTrace(jit, th->cfp, exit_pc, trace);

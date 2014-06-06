@@ -120,14 +120,14 @@ static int buffer_printf(Buffer *buf, const char *fmt, va_list ap)
     }
 }
 
+static uint64_t timer = 0;
+
 static uint64_t getTimeMilliSecond(void)
 {
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return tv.tv_sec * 1000 + tv.tv_usec / 1000;
 }
-
-static uint64_t timer = 0;
 
 // cgen
 enum cgen_mode {
@@ -143,12 +143,11 @@ typedef struct CGen {
     enum cgen_mode mode;
 } CGen;
 
-static const char cmd_template[]
-    = "clang -pipe -x c "
-      "%s %s "
-      "-Ijit/ -Ibuild/ -Ibuild/.ext/include/x86_64-darwin13 -Iinclude -I. "
-      "-dynamiclib -O" GWIT_CGEN_OPT_LEVEL " -g" GWIT_CGEN_DBG_LEVEL
-      " -Wall -o %s %s";
+static const char cmd_template[] = "clang -pipe -x c "
+                                   "%s %s "
+                                   "-Ijit/ -Ibuild/ -Ibuild/.ext/include/x86_64-darwin13 -Iinclude -I. "
+                                   "-dynamiclib -O" GWIT_CGEN_OPT_LEVEL " -g" GWIT_CGEN_DBG_LEVEL
+                                   " -Wall -o %s %s";
 
 static size_t find_parent_path_end(char *buf, size_t path_len)
 {
@@ -355,25 +354,6 @@ static long GetBlockId(hashmap_t *SideExitBBs, VALUE *pc)
     long val = (long)hashmap_get(SideExitBBs, (hashmap_data_t)pc);
     assert(val != 0);
     return val >> 1;
-}
-
-static void generate_flonum_cond(CGen *gen, const char *op, long Id, reg_t LHS,
-                                 reg_t RHS)
-{
-    cgen_printf(gen, "v%ld = RFLOAT_VALUE(v%ld) %s RFLOAT_VALUE(v%ld)"
-                     "? Qtrue : Qfalse;\n",
-                Id, LHS, op, RHS);
-}
-
-static void generate_fixnum_cond(CGen *gen, const char *op, long Id, reg_t LHS,
-                                 reg_t RHS)
-{
-    cgen_printf(gen, "{\n"
-                     "  SIGNED_VALUE recv = v%ld;\n"
-                     "  SIGNED_VALUE obj  = v%ld;\n"
-                     "  v%ld = (recv %s obj) ? Qtrue : Qfalse;\n"
-                     "}\n",
-                LHS, RHS, Id, op);
 }
 
 // convert LIR to C code
@@ -588,6 +568,10 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
     }
     return ptr;
 }
+
+#define EMIT_CODE(GEN, OP, VAL, LHS, RHS) \
+        cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld, v%ld);\n",\
+                (VAL), (LHS), (RHS))
 
 static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                            hashmap_t *SideExitBBs,
@@ -817,259 +801,143 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     }
     case OPCODE_IFixnumAddOverflow: {
         IFixnumAddOverflow *ir = (IFixnumAddOverflow *)Inst;
-        cgen_printf(gen,
-                    "{ VALUE val;\n"
-                    "  VALUE recv = v%ld;\n"
-                    "  VALUE obj  = v%ld;\n"
-                    //"#ifndef LONG_LONG_VALUE\n"
-                    "  val = (recv + (obj & (~1)));\n"
-                    "  if ((~(recv ^ obj) & (recv ^ val)) &\n"
-                    "    ((VALUE)0x01 << ((sizeof(VALUE) * CHAR_BIT) - 1))) {\n"
-                    "    val = rb_big_plus(rb_int2big(FIX2LONG(recv)),\n"
-                    "                      rb_int2big(FIX2LONG(obj)));\n"
-                    "  }\n"
-                    //"#else\n"
-                    //"  long a, b, c;\n"
-                    //"  a = FIX2LONG(recv);\n"
-                    //"  b = FIX2LONG(obj);\n"
-                    //"  c = a + b;\n"
-                    //"  if (FIXABLE(c)) {\n"
-                    //"    val = LONG2FIX(c);\n"
-                    //"  }\n"
-                    //"  else {\n"
-                    //"    val = rb_big_plus(rb_int2big(a), rb_int2big(b));\n"
-                    //"  }\n"
-                    //"#endif\n"
-                    "  v%ld = val;\n"
-                    "}\n",
-                    ir->LHS, ir->RHS, Id);
+        EMIT_CODE(gen, IFixnumAddOverflow, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumSubOverflow: {
         IFixnumSubOverflow *ir = (IFixnumSubOverflow *)Inst;
-        cgen_printf(gen,
-                    "{ VALUE val;\n"
-                    "  VALUE recv = v%ld;\n"
-                    "  VALUE obj  = v%ld;\n"
-                    "  long a, b, c;\n"
-                    "  \n"
-                    "  a = FIX2LONG(recv);\n"
-                    "  b = FIX2LONG(obj);\n"
-                    "  c = a - b;\n"
-                    "  \n"
-                    "  if (FIXABLE(c)) {\n"
-                    "      val = LONG2FIX(c);\n"
-                    "  }\n"
-                    "  else {\n"
-                    "      val = rb_big_minus(rb_int2big(a), rb_int2big(b));\n"
-                    "  }\n"
-                    "  v%ld = val;\n"
-                    "}\n",
-                    ir->LHS, ir->RHS, Id);
+        EMIT_CODE(gen, IFixnumSubOverflow, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumMulOverflow: {
         IFixnumMulOverflow *ir = (IFixnumMulOverflow *)Inst;
-        cgen_printf(gen,
-                    "{ VALUE val;\n"
-                    "  VALUE recv = v%ld;\n"
-                    "  VALUE obj  = v%ld;\n"
-                    "  long a, b;\n"
-                    "  \n"
-                    "  a = FIX2LONG(recv);\n"
-                    "  if (a == 0) {\n"
-                    "    val = recv;\n"
-                    "  }\n"
-                    "  else {\n"
-                    "    b = FIX2LONG(obj);\n"
-                    "    if (MUL_OVERFLOW_FIXNUM_P(a, b)) {\n"
-                    "      val = rb_big_mul(rb_int2big(a), rb_int2big(b));\n"
-                    "    }\n"
-                    "    else {\n"
-                    "      val = LONG2FIX(a * b);\n"
-                    "    }\n"
-                    "  }\n"
-                    "  v%ld = val;\n"
-                    "}\n",
-                    ir->LHS, ir->RHS, Id);
+        EMIT_CODE(gen, IFixnumMulOverflow, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumDivOverflow: {
         IFixnumDivOverflow *ir = (IFixnumDivOverflow *)Inst;
-        cgen_printf(gen, "{\n"
-                         "  VALUE recv = v%ld;\n"
-                         "  VALUE obj  = v%ld;\n"
-                         "  long x = FIX2LONG(recv);\n"
-                         "  long y = FIX2LONG(obj);\n"
-                         "  x = (x > 0)? x : -x;\n"
-                         "  y = (y > 0)? y : -y;\n"
-                         "  long div = x / y;\n"
-                         "  long mod = x - div * y;\n"
-                         "  if ((mod < 0 && y > 0) || (mod > 0 && y < 0)) {\n"
-                         "    mod += y;\n"
-                         "    div -= 1;\n"
-                         "  }\n"
-                         "  v%ld = LONG2NUM(div);\n"
-                         "}\n",
-                    ir->LHS, ir->RHS, Id);
+        EMIT_CODE(gen, IFixnumModOverflow, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumModOverflow: {
         IFixnumModOverflow *ir = (IFixnumModOverflow *)Inst;
-        cgen_printf(gen, "{\n"
-                         "  VALUE recv = v%ld;\n"
-                         "  VALUE obj  = v%ld;\n"
-                         "  long x = FIX2LONG(recv);\n"
-                         "  long y = FIX2LONG(obj);\n"
-                         "  x = (x > 0)? x : -x;\n"
-                         "  y = (y > 0)? y : -y;\n"
-                         "  long div = x / y;\n"
-                         "  long mod = x - div * y;\n"
-                         "  if ((mod < 0 && y > 0) || (mod > 0 && y < 0)) {\n"
-                         "    mod += y;\n"
-                         "    div -= 1;\n"
-                         "  }\n"
-                         "  v%ld = LONG2NUM(mod);\n"
-                         "}\n",
-                    ir->LHS, ir->RHS, Id);
+        EMIT_CODE(gen, IFixnumModOverflow, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumEq: {
         IFixnumEq *ir = (IFixnumEq *)Inst;
-        generate_fixnum_cond(gen, "==", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumEq, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumNe: {
         IFixnumNe *ir = (IFixnumNe *)Inst;
-        generate_fixnum_cond(gen, "!=", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumNe, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumGt: {
         IFixnumGt *ir = (IFixnumGt *)Inst;
-        generate_fixnum_cond(gen, ">", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumGt, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumGe: {
         IFixnumGe *ir = (IFixnumGe *)Inst;
-        generate_fixnum_cond(gen, ">=", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumGe, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumLt: {
         IFixnumLt *ir = (IFixnumLt *)Inst;
-        generate_fixnum_cond(gen, "<", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumLt, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumLe: {
         IFixnumLe *ir = (IFixnumLe *)Inst;
-        generate_fixnum_cond(gen, "<=", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumLe, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumAnd: {
         IFixnumAnd *ir = (IFixnumAnd *)Inst;
-        cgen_printf(gen,
-                    "  v%ld = LONG2NUM(FIX2LONG(v%ld) & FIX2LONG(v%ld));\n", Id,
-                    ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumAnd, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumOr: {
         IFixnumOr *ir = (IFixnumOr *)Inst;
-        cgen_printf(gen,
-                    "  v%ld = LONG2NUM(FIX2LONG(v%ld) | FIX2LONG(v%ld));\n", Id,
-                    ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumOr, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumXor: {
         IFixnumXor *ir = (IFixnumXor *)Inst;
-        cgen_printf(gen,
-                    "  v%ld = LONG2NUM(FIX2LONG(v%ld) ^ FIX2LONG(v%ld));\n", Id,
-                    ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumXor, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumLshift: {
         IFixnumLshift *ir = (IFixnumLshift *)Inst;
-        assert(0 && "not implemented");
-        cgen_printf(gen,
-                    "  v%ld = LONG2NUM(FIX2LONG(v%ld) << FIX2LONG(v%ld));\n",
-                    Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumLshift, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumRshift: {
         IFixnumRshift *ir = (IFixnumRshift *)Inst;
-        assert(0 && "not implemented");
-        cgen_printf(gen,
-                    "  v%ld = LONG2NUM(FIX2LONG(v%ld) >> FIX2LONG(v%ld));\n",
-                    Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumRshift, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumComplement: {
         IFixnumComplement *ir = (IFixnumComplement *)Inst;
-        cgen_printf(gen, "  v%ld = ~v%ld | FIXNUM_FLAG;\n", Id, ir->Recv);
-        assert(0 && "not implemented");
+        cgen_printf(gen, "v%ld = rb_jit_exec_IFixnumComplement(v%ld);\n",
+                Id, ir->Recv);
         break;
     }
     case OPCODE_IFloatAdd: {
         IFloatAdd *ir = (IFloatAdd *)Inst;
-        cgen_printf(
-            gen, "v%ld = DBL2NUM(RFLOAT_VALUE(v%ld) + RFLOAT_VALUE(v%ld));\n",
-            Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatAdd, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatSub: {
         IFloatSub *ir = (IFloatSub *)Inst;
-        cgen_printf(
-            gen, "v%ld = DBL2NUM(RFLOAT_VALUE(v%ld) - RFLOAT_VALUE(v%ld));\n",
-            Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatSub, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatMul: {
         IFloatMul *ir = (IFloatMul *)Inst;
-        cgen_printf(
-            gen, "v%ld = DBL2NUM(RFLOAT_VALUE(v%ld) * RFLOAT_VALUE(v%ld));\n",
-            Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatMul, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatDiv: {
         IFloatDiv *ir = (IFloatDiv *)Inst;
-        cgen_printf(
-            gen, "v%ld = DBL2NUM(RFLOAT_VALUE(v%ld) / RFLOAT_VALUE(v%ld));\n",
-            Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatDiv, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatMod: {
         IFloatMod *ir = (IFloatMod *)Inst;
-        cgen_printf(gen, "v%ld = DBL2NUM(ruby_float_mod(RFLOAT_VALUE(v%ld),"
-                         "RFLOAT_VALUE(v%ld)));\n",
-                    Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatMod, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatEq: {
         IFloatEq *ir = (IFloatEq *)Inst;
-        generate_flonum_cond(gen, "==", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatEq , Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatNe: {
         IFloatNe *ir = (IFloatNe *)Inst;
-        generate_flonum_cond(gen, "!=", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatNe , Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatGt: {
         IFloatGt *ir = (IFloatGt *)Inst;
-        generate_flonum_cond(gen, ">", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatGt , Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatGe: {
         IFloatGe *ir = (IFloatGe *)Inst;
-        generate_flonum_cond(gen, ">=", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatGe , Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatLt: {
         IFloatLt *ir = (IFloatLt *)Inst;
-        generate_flonum_cond(gen, "<", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatLt , Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatLe: {
         IFloatLe *ir = (IFloatLe *)Inst;
-        generate_flonum_cond(gen, "<=", Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatLe , Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumToFloat: {

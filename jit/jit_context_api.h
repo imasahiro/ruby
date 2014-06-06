@@ -78,4 +78,6 @@ static inline VALUE jit_rb_class_of(VALUE obj)
     }
     return RBASIC(obj)->klass;
 }
+
+#include "gwir_template.h"
 #endif /* end of include guard */

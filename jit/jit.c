@@ -644,10 +644,27 @@ static void TraceRecorderAbort(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     TraceRecorderClear(Rec, 0);
 }
 
-static TraceExitStatus Invoke(rb_thread_t *th, Trace *trace, Event *e,
-                              VALUE **exit_pc_ptr)
+static VALUE *Invoke(RJit *jit, rb_thread_t *th, Trace *trace, Event *e)
 {
-    return trace->Code(th, e->cfp, e->pc, exit_pc_ptr);
+    VALUE *exit_pc = NULL;
+    TraceExitStatus exit_status;
+    exit_status = trace->Code(th, e->cfp, e->pc, &exit_pc);
+#if GWIT_LOG_SIDE_EXIT > 0
+    fprintf(stderr, "trace for %p is exit from %p\n", e->pc, exit_pc);
+#endif
+    switch (exit_status) {
+    case TRACE_EXIT_SIDE_EXIT:
+        trace = GetOrAddTrace(jit, th->cfp, exit_pc, trace);
+        TraceRecorderClear(jit->Rec, 1);
+        RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
+        break;
+    case TRACE_EXIT_SUCCESS:
+        break;
+    case TRACE_EXIT_ERROR:
+        assert(0 && "unreachable");
+        break;
+    }
+    return exit_pc;
 }
 
 // Stopping rule of trace recording
@@ -694,13 +711,11 @@ static int isTracableNativeCall(Event *e)
             return 1;
         case VM_METHOD_TYPE_ISEQ:
             return 1;
-        case VM_METHOD_TYPE_CFUNC: {
+        case VM_METHOD_TYPE_CFUNC:
             /* check Math method */
-            VALUE cMath = rb_singleton_class(rb_mMath);
-            if (ci->me->klass == cMath) {
+            if (ci->me->klass == rb_cMath) {
                 return 1;
             }
-        }
         default:
             break;
         }
@@ -765,24 +780,7 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
     /* trace dispatch */
     trace = FindTrace(jit, e->pc);
     if (trace && trace->Code) {
-        VALUE *exit_pc = NULL;
-        TraceExitStatus exit_status = Invoke(th, trace, e, &exit_pc);
-#if GWIT_LOG_SIDE_EXIT > 0
-        fprintf(stderr, "trace for %p is exit from %p\n", e->pc, exit_pc);
-#endif
-        switch (exit_status) {
-        case TRACE_EXIT_SIDE_EXIT:
-            trace = GetOrAddTrace(jit, th->cfp, exit_pc, trace);
-            TraceRecorderClear(jit->Rec, 1);
-            RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
-            break;
-        case TRACE_EXIT_SUCCESS:
-            break;
-        case TRACE_EXIT_ERROR:
-            assert(0 && "unreachable");
-            break;
-        }
-        return exit_pc;
+        return Invoke(jit, th, trace, e);
     }
     /* identify potential trace head */
     if (isBackwardBranch(e)) {

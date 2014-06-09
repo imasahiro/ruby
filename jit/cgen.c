@@ -536,17 +536,17 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs,
 
 static void trace_freeze(TraceRecorder *Rec, Trace *trace)
 {
-    Trace *parent = trace->Parent;
+    //Trace *parent = trace->Parent;
 
-    hashmap_iterator_t itr = { 0, 0 };
-    while (hashmap_next(&trace->StackMap, &itr)) {
-        VALUE *pc = (VALUE *)itr.entry->key;
-        StackMap *stack = GetStackMap(Rec, pc);
-    }
+    //hashmap_iterator_t itr = { 0, 0 };
+    //while (hashmap_next(&trace->StackMap, &itr)) {
+    //    VALUE *pc = (VALUE *)itr.entry->key;
+    //    StackMap *stack = GetStackMap(Rec, pc);
+    //}
 
-    if (parent == NULL) {
-        return;
-    }
+    //if (parent == NULL) {
+    //    return;
+    //}
 }
 
 int trace_sideexit_size(Trace *trace)
@@ -560,7 +560,6 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
     char path[128] = {};
     char fname[128] = {};
     CGen gen;
-    native_func_t ptr;
     int id = serial_id++;
     Trace *trace = TraceRecorderGetTrace(Rec);
     if (id == 0) {
@@ -585,7 +584,7 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
 
     cgen_close(&gen);
     hashmap_dispose(&SideExitBBs, 0);
-    return ptr;
+    return trace->Code;
 }
 
 #define EMIT_CODE(GEN, OP, VAL, LHS, RHS) \

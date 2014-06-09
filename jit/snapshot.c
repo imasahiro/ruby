@@ -33,7 +33,7 @@ static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
 {
 #if DUMP_STACK_MAP > 0
     fprintf(stderr, "\t\ts:pc=%p:top=%d bottom=%d, %d\n", PC,
-            0 /*Rec->stack_top*/, Rec->StackBottom, Rec->RegStackSize);
+            0 /*Rec->stack_top*/, Rec->RegStackBottom, Rec->RegStackSize);
 #endif
     int begin = Rec->RegStackBottom;
     int end = Rec->RegStackSize;
@@ -67,7 +67,7 @@ static reg_t AdjustStack(TraceRecorder *Rec)
     BasicBlock *PrevBB = Rec->Block;
     Rec->Block = Rec->EntryBlock;
     Reg = Emit_StackPop(Rec);
-    assert(sa->base.opcode == OPCODE_IStackAdjust);
+    assert(lir_opcode(&sa->base) == OPCODE_IStackAdjust);
 
     /*
      *      before     |   after
@@ -78,8 +78,8 @@ static reg_t AdjustStack(TraceRecorder *Rec)
      * L4: StackPop(1) | Jump Block
      */
     int jumpIdx = Rec->EntryBlock->size - 1;
-    lir_compile_data_header_t **Insts = Rec->EntryBlock->Insts;
-    lir_compile_data_header_t *last, *jump;
+    lir_inst_t **Insts = Rec->EntryBlock->Insts;
+    lir_inst_t *last, *jump;
     jump = Insts[jumpIdx - 1];
     last = Insts[jumpIdx];
     Insts[jumpIdx - 1] = last;
@@ -165,7 +165,7 @@ static reg_t TopRegister(TraceRecorder *Rec, int n)
         Reg = Rec->RegStack[idx];
     }
 #if DUMP_STACK_MAP > 1
-    fprintf(stderr, "top : %ld %ld\n", idx, Reg);
+    fprintf(stderr, "top : %d %ld\n", idx, Reg);
 #endif
     assert(Reg != 0);
     return Reg;
@@ -177,7 +177,7 @@ static void SetRegister(TraceRecorder *Rec, int n, reg_t Reg)
     assert(idx < Rec->RegStackSize && idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
     TraceRecorderRecordBottom(Rec, idx);
 #if DUMP_STACK_MAP > 1
-    fprintf(stderr, "set : %ld %ld\n", idx, Reg);
+    fprintf(stderr, "set : %d %ld\n", idx, Reg);
 #endif
     assert(Reg != 0);
     Rec->RegStack[idx] = Reg;

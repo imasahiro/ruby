@@ -57,7 +57,7 @@ open(ARGV[0]) { |file|
       ##
       puts "#define OPCODE_I#{ir.name}   #{i}\n"
       puts "typedef struct I#{ir.name} {\n"
-      puts "  lir_compile_data_header_t base;"
+      puts "  lir_inst_t base;"
       ir.arg.each{|e|
         type = e.type
         name = e.name
@@ -125,10 +125,10 @@ open(ARGV[0]) { |file|
       end
 
       puts "#if DUMP_LIR > 0"
-      print "static void Dump_#{ir.name}(lir_compile_data_header_t *Inst)\n"
+      print "static void Dump_#{ir.name}(lir_inst_t *Inst)\n"
       puts "{\n"
       puts "  I#{ir.name} *ir = (I#{ir.name} *)Inst;\n"
-      puts "  fprintf(stderr, \"  \" FMT_ID \" #{ir.name}\", ir->base.id);"
+      puts "  fprintf(stderr, \"  \" FMT_ID \" #{ir.name}\", lir_getid(&ir->base));"
 
       ir.arg.each{|e|
         t = e.type

@@ -864,7 +864,7 @@ jit_prelude.c: $(srcdir)/tool/compile_prelude.rb $(srcdir)/jit/jit_prelude.rb
 jit.$(OBJEXT): {$(VPATH)}jit/jit.c {$(VPATH)}jit/jit_opts.h \
 	{$(VPATH)}jit/ir.c {$(VPATH)}jit/record.c  {$(VPATH)}jit/snapshot.c \
 	{$(VPATH)}jit/cgen.c {$(VPATH)}jit_prelude.c \
-	{$(VPATH)}jit/hashmap.c \
+	{$(VPATH)}jit/hashmap.c {$(VPATH)}jit/optimizer.c \
 	{$(VPATH)}vmrecord.inc {$(VPATH)}gwir.c {$(VPATH)}yarv2gwir.c
 	@$(ECHO) compiling $<
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c $<

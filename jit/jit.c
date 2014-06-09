@@ -45,12 +45,20 @@ typedef struct lir_compile_data_header {
     unsigned opcode : 10;
     unsigned flag : 22;
     int id;
-    struct lir_compile_data_header *next;
 } lir_compile_data_header_t;
 
-typedef struct lir_basic_block {
+typedef struct lir_list_t {
     lir_compile_data_header_t base;
-    lir_compile_data_header_t **Insts;
+    struct lir_list_t *next;
+} lir_list_t;
+
+typedef struct lir_inst_t {
+    lir_compile_data_header_t base;
+} lir_inst_t;
+
+typedef struct lir_basic_block {
+    lir_list_t base;
+    lir_inst_t **Insts;
     unsigned size;
     unsigned capacity;
     VALUE *start_pc;
@@ -220,7 +228,7 @@ typedef TraceExitStatus (*native_func_t)(rb_thread_t *th,
                                          rb_control_frame_t *reg_cfp,
                                          VALUE *reg_pc, VALUE **exit_pc);
 
-static native_func_t TranslateToNativeCode(TraceRecorder *Rec);
+static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace);
 
 struct RJit {
     TraceRecorder *Rec;
@@ -306,7 +314,8 @@ struct Trace {
     unsigned counter;
     unsigned flag;
     hashmap_t StackMap;
-    void *hdr;
+    hashmap_t *SideExit;
+    void *handler;
 };
 
 static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
@@ -319,22 +328,34 @@ static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
     trace->counter = 0;
     trace->iseq = iseq;
     hashmap_init(&trace->StackMap, 1);
+    trace->SideExit = NULL;
+    trace->handler = NULL;
     return trace;
 }
 
-static void TraceReset(Trace *trace)
+static void TraceDropHandler(Trace *trace);
+static void TraceClear(Trace *trace, int alloc)
 {
-    if (hashmap_size(&trace->StackMap) > 0) {
-        hashmap_dispose(&trace->StackMap,
-                        (hashmap_entry_destructor_t)DeleteStackMap);
+    hashmap_dispose(&trace->StackMap, (hashmap_entry_destructor_t)DeleteStackMap);
+    if (alloc) {
         hashmap_init(&trace->StackMap, 1);
+    }
+
+    if (trace->SideExit) {
+        hashmap_dispose(trace->SideExit, NULL);
+    }
+
+    if (trace->handler) {
+        TraceDropHandler(trace);
+        trace->handler = NULL;
     }
 }
 
+static void trace_optimize(TraceRecorder *Rec, Trace *trace);
+
 static void TraceFree(Trace *trace)
 {
-    hashmap_dispose(&trace->StackMap,
-                    (hashmap_entry_destructor_t)DeleteStackMap);
+    TraceClear(trace, 0);
     free(trace);
 }
 
@@ -457,8 +478,8 @@ struct TraceRecorder {
     BasicBlock *Block;
     BasicBlock *EntryBlock;
 
-    lir_compile_data_header_t *buffer_head;
-    lir_compile_data_header_t *buffer_root;
+    lir_list_t *buffer_head;
+    lir_list_t *buffer_root;
     char *buffer_current;
 
     reg_t *RegStack;
@@ -495,38 +516,36 @@ static void TraceRecorderDelete(TraceRecorder *Rec)
     free(Rec);
 }
 
-#define BUFF_POS(STORAGE) ((STORAGE)->id)
-#define BUFF_SIZE(STORAGE) ((STORAGE)->flag)
-static lir_compile_data_header_t *lir_alloc(TraceRecorder *Rec, size_t size)
+#define BUFF_POS(STORAGE) ((STORAGE)->base.id)
+#define BUFF_SIZE(STORAGE) ((STORAGE)->base.flag)
+static void *lir_alloc(TraceRecorder *Rec, size_t size)
 {
     lir_compile_data_header_t *ptr;
-    lir_compile_data_header_t *storage = Rec->buffer_head;
+    lir_list_t *storage = Rec->buffer_head;
     if (BUFF_POS(storage) + size > BUFF_SIZE(storage)) {
         unsigned alloc_size = BUFF_SIZE(storage) * 2;
         while (alloc_size < size) {
             alloc_size *= 2;
         }
-        storage->next = malloc(sizeof(lir_compile_data_header_t) + alloc_size);
-        Rec->buffer_head = storage = storage->next;
+        storage->next = (lir_list_t *)malloc(sizeof(lir_list_t) + alloc_size);
+        Rec->buffer_head = storage = (lir_list_t *)storage->next;
         storage->next = NULL;
         Rec->buffer_current = (char *)(storage + 1);
         BUFF_POS(storage) = 0;
         BUFF_SIZE(storage) = alloc_size;
     }
-    ptr = (lir_compile_data_header_t *)(Rec->buffer_current
-                                        + BUFF_POS(storage));
+    ptr = (lir_compile_data_header_t *)(Rec->buffer_current + BUFF_POS(storage));
     memset(ptr, 0, size);
     ptr->id = Rec->LastInstId++;
     BUFF_POS(storage) += (unsigned)size;
     return ptr;
 }
 
-static lir_compile_data_header_t *lir_realloc(TraceRecorder *Rec, void *oldptr,
-                                              size_t oldsize, size_t newsize)
+static void *lir_realloc(TraceRecorder *Rec, void *oldptr, size_t oldsize, size_t newsize)
 {
     void *newptr = NULL;
     if (oldsize >= newsize) {
-        return (lir_compile_data_header_t *)oldptr;
+        return oldptr;
     }
     newptr = lir_alloc(Rec, newsize);
     memcpy(newptr, oldptr, oldsize);
@@ -540,19 +559,19 @@ static Trace *TraceRecorderGetTrace(TraceRecorder *Rec)
 
 static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
 {
-    lir_compile_data_header_t *storage = Rec->buffer_head;
+    lir_list_t *storage = Rec->buffer_head;
     Rec->Block = NULL;
     Rec->EntryBlock = NULL;
     Rec->LastInstId = 0;
     Rec->buffer_head = NULL;
     Rec->buffer_current = NULL;
     while (storage != NULL) {
-        lir_compile_data_header_t *next = storage->next;
+        lir_list_t *next = storage->next;
         free(storage);
         storage = next;
     }
     if (AllocBuffer) {
-        Rec->buffer_head = malloc(sizeof(lir_compile_data_header_t)
+        Rec->buffer_head = malloc(sizeof(lir_list_t)
                                   + LIR_COMPILE_DATA_BUFF_SIZE);
         BUFF_POS(Rec->buffer_head) = 0;
         BUFF_SIZE(Rec->buffer_head) = LIR_COMPILE_DATA_BUFF_SIZE;
@@ -616,10 +635,12 @@ static int TraceRecorderIsFull(TraceRecorder *Rec)
 
 static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)
 {
-    jit->CurrentTrace->Code = NULL;
     dump_lir(Rec);
+    jit->CurrentTrace->Code = NULL;
     if (CountLIRInstSize(Rec) > GWIR_MIN_TRACE_LENGTH) {
-        TranslateToNativeCode(Rec);
+        Trace *trace = TraceRecorderGetTrace(Rec);
+        trace_optimize(Rec, trace);
+        TranslateToNativeCode(Rec, trace);
     }
     jit->CurrentTrace = NULL;
     TraceRecorderClear(Rec, 0);
@@ -793,7 +814,7 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
         trace->counter += 1;
         if (trace->counter > HOT_TRACE_THRESHOLD) {
             RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
-            TraceReset(trace);
+            TraceClear(trace, 1);
             TraceRecorderClear(jit->Rec, 1);
             TraceRecorderAppend(jit, jit->Rec, e);
         }
@@ -809,6 +830,7 @@ VALUE *rb_jit_trace(rb_thread_t *th, rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 }
 
 #include "ir.c"
+#include "optimizer.c"
 #include "snapshot.c"
 #include "record.c"
 #include "cgen.c"

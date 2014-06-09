@@ -360,7 +360,7 @@ static long GetBlockId(hashmap_t *SideExitBBs, VALUE *pc)
 
 static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                            hashmap_t *SideExitBBs,
-                           lir_compile_data_header_t *Inst);
+                           lir_inst_t *Inst);
 
 static void PrepareSideExit(TraceRecorder *Rec, CGen *gen,
                             hashmap_t *SideExitBBs)
@@ -409,8 +409,8 @@ static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
         cgen_printf(gen, "th->cfp = reg_cfp = original_cfp;\n");
         cgen_printf(gen, "SET_SP(original_sp);\n");
         for (i = 0; i < stack->size; i++) {
-            lir_compile_data_header_t *Inst = FindLIRById(Rec, stack->regs[i]);
-            if (Inst->opcode == OPCODE_IFramePush) {
+            lir_inst_t *Inst = FindLIRById(Rec, stack->regs[i]);
+            if (lir_opcode(Inst) == OPCODE_IFramePush) {
                 IFramePush *ir = (IFramePush *)Inst;
                 int offset = j - (ir->invokeblock ? 1 : 0);
                 cgen_printf(gen, "SET_SP(GET_SP() + %d);\n", offset);
@@ -508,8 +508,8 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs,
     while (block != NULL) {
         unsigned i = 0;
         for (i = 0; i < block->size; i++) {
-            lir_compile_data_header_t *Inst = block->Insts[i];
-            if (lir_inst_define_value(Inst->opcode)) {
+            lir_inst_t *Inst = block->Insts[i];
+            if (lir_inst_define_value(lir_opcode(Inst))) {
                 long Id = lir_getid(Inst);
                 assert(Id != 0);
                 cgen_printf(gen, "VALUE v%ld = 0;\n", Id);
@@ -521,17 +521,23 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs,
     block = Rec->EntryBlock;
     while (block != NULL) {
         unsigned i = 0;
-        cgen_printf(gen, "BLOCK_LABEL(%d);\n", block->base.id);
+        cgen_printf(gen, "BLOCK_LABEL(%ld);\n", block_id(block));
         // cgen_printf(gen, "fprintf(stderr, \"block%d\\n\");\n",
         // block->base.id);
         for (i = 0; i < block->size; i++) {
-            lir_compile_data_header_t *Inst = block->Insts[i];
+            lir_inst_t *Inst = block->Insts[i];
             TranslateLIR2C(Rec, gen, SideExitBBs, Inst);
         }
         block = (BasicBlock *)block->base.next;
     }
     EmitSideExit(Rec, gen, SideExitBBs);
     cgen_printf(gen, "}\n");
+}
+
+static void TraceDropHandler(Trace *trace)
+{
+    dlclose(trace->handler);
+    trace->Code = NULL;
 }
 
 static void trace_freeze(TraceRecorder *Rec, Trace *trace)
@@ -554,14 +560,14 @@ int trace_sideexit_size(Trace *trace)
     return hashmap_size(&trace->StackMap);
 }
 
-static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
+static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
 {
     static int serial_id = 0;
     char path[128] = {};
     char fname[128] = {};
     CGen gen;
     int id = serial_id++;
-    Trace *trace = TraceRecorderGetTrace(Rec);
+
     if (id == 0) {
         gwjit_context_init();
     }
@@ -593,10 +599,10 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
 
 static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                            hashmap_t *SideExitBBs,
-                           lir_compile_data_header_t *Inst)
+                           lir_inst_t *Inst)
 {
     long Id = lir_getid(Inst);
-    switch (Inst->opcode) {
+    switch (lir_opcode(Inst)) {
     case OPCODE_IGuardTypeFixnum: {
         IGuardTypeFixnum *ir = (IGuardTypeFixnum *)Inst;
         long ExitBlockId = GetBlockId(SideExitBBs, ir->Exit);
@@ -1378,14 +1384,23 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         break;
     }
     case OPCODE_IJump: {
+        BasicBlock *BB;
         IJump *ir = (IJump *)Inst;
-        BasicBlock *BB = FindBasicBlockByPC(Rec, ir->TargetBB);
-        cgen_printf(gen, "goto L_%d;\n", BB->base.id);
+        assert((ir->base.base.flag & FLAG_BLOCK) == FLAG_BLOCK);
+        BB = (BasicBlock *)ir->TargetBB;
+        cgen_printf(gen, "goto L_%ld;\n", block_id(BB));
         break;
     }
     case OPCODE_IJumpIf: {
-        // IJumpIf *ir = (IJumpIf *) Inst;
-        assert(0 && "not implemented");
+        BasicBlock *BB;
+        IJumpIf *ir = (IJumpIf *)Inst;
+        assert((ir->base.base.flag & FLAG_BLOCK) == FLAG_BLOCK);
+        BB = (BasicBlock *)ir->TargetBB;
+        assert(0 && "need test");
+        cgen_printf(gen, "if (RTEST(v%ld)) {\n"
+                         "    goto L_%ld;\n"
+                         "}\n",
+                    ir->Cond, block_id(BB));
         break;
     }
     case OPCODE_IThrow: {

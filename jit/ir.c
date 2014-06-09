@@ -8,14 +8,15 @@
 
  **********************************************************************/
 
+#define FLAG_BLOCK (1 << 0)
 #define FMT(T) FMT_##T
 #define FMT_int "%d"
 #define FMT_long "%ld"
 #define FMT_reg_t "%04ld"
 #define FMT_RegPtr "%04ld"
-#define FMT_ID "%04d"
+#define FMT_ID "%04ld"
 #define FMT_VALUE "0x%lx"
-#define FMT_VALUEPtr "%p"
+#define FMT_VALUEPtr (((Inst)->base.flag & FLAG_BLOCK) ? "bb:%ld" : "0x%lx")
 #define FMT_voidPtr "%p"
 #define FMT_CALL_INFO "%p"
 #define FMT_IC "%p"
@@ -29,7 +30,9 @@
 #define DATA_reg_t(V) (V)
 #define DATA_RegPtr(V) (*(V))
 #define DATA_VALUE(V) (V)
-#define DATA_VALUEPtr(V) (V)
+#define DATA_VALUEPtr(V) (((Inst)->base.flag & FLAG_BLOCK) \
+                              ? block_id((BasicBlock *)V)  \
+                              : ((long)V))
 #define DATA_voidPtr(V) (V)
 #define DATA_CALL_INFO(V) (V)
 #define DATA_IC(V) (V)
@@ -37,7 +40,20 @@
 #define DATA_BasicBlockPtr(V) (lir_getid(&(V)->base))
 #define DATA_rb_event_flag_t(V) (V)
 
-static long lir_getid(lir_compile_data_header_t *ir) { return (long)ir->id; }
+static long lir_getid(lir_inst_t *ir)
+{
+    return (long)ir->base.id;
+}
+
+static int lir_opcode(lir_inst_t *ir)
+{
+    return ir->base.opcode;
+}
+
+static long block_id(BasicBlock *bb)
+{
+    return (long)bb->base.base.id;
+}
 
 static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc)
 {
@@ -49,15 +65,14 @@ static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc)
 
     bb = (BasicBlock *)lir_alloc(Rec, sizeof(BasicBlock));
     // fprintf(stderr, "newblock=(%p, %p)\n", bb, pc);
-    bb->base.flag = 0;
+    bb->base.base.flag = 0;
     bb->base.next = NULL;
     bb->start_pc = pc;
     bb->size = 0;
     bb->capacity = 1;
-    bb->Insts = (lir_compile_data_header_t **)lir_alloc(
-        Rec, sizeof(lir_compile_data_header_t *) * 1);
+    bb->Insts = (lir_inst_t **)lir_alloc(Rec, sizeof(lir_inst_t *) * 1);
     if (Rec->Block != NULL) {
-        Rec->Block->base.next = (lir_compile_data_header_t *)bb;
+        Rec->Block->base.next = (lir_list_t *)bb;
     }
 
     Rec->Block = bb;
@@ -88,13 +103,13 @@ static unsigned CountLIRInstSize(TraceRecorder *Rec)
 }
 
 // FIXME this function is super slow!!!
-static lir_compile_data_header_t *FindLIRById(TraceRecorder *Rec, reg_t Reg)
+static lir_inst_t *FindLIRById(TraceRecorder *Rec, reg_t Reg)
 {
     BasicBlock *block = Rec->EntryBlock;
     while (block != NULL) {
         unsigned i = 0;
         for (i = 0; i < block->size; i++) {
-            if (block->Insts[i]->id == Reg) {
+            if (lir_getid(block->Insts[i]) == Reg) {
                 return block->Insts[i];
             }
         }
@@ -105,15 +120,14 @@ static lir_compile_data_header_t *FindLIRById(TraceRecorder *Rec, reg_t Reg)
 
 static void *lir_inst_init(void *ptr, unsigned opcode)
 {
-    lir_compile_data_header_t *inst = (lir_compile_data_header_t *)ptr;
-    inst->id = 0;
-    inst->flag = 0;
-    inst->opcode = opcode;
+    lir_inst_t *inst = (lir_inst_t *)ptr;
+    inst->base.id = 0;
+    inst->base.flag = 0;
+    inst->base.opcode = opcode;
     return inst;
 }
 
-static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
-                   size_t inst_size);
+static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size);
 
 #define LIR_NEWINST(T) ((T *)lir_inst_init(alloca(sizeof(T)), OPCODE_##T))
 #define LIR_NEWINST_N(T, SIZE) \
@@ -126,7 +140,7 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
 
 #include "gwir.c"
 
-static int elimnate_guard(TraceRecorder *Rec, lir_compile_data_header_t *inst)
+static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst)
 {
     /* Remove guard that always true
      * If we think following code, L2 is always true. So we can remove L2.
@@ -134,47 +148,46 @@ static int elimnate_guard(TraceRecorder *Rec, lir_compile_data_header_t *inst)
      * L2 = GuardTypeFixnum L1 exit_pc
      */
     IGuardTypeFixnum *guard = (IGuardTypeFixnum *) inst;
-    lir_compile_data_header_t *src = FindLIRById(Rec, guard->R);
+    lir_inst_t *src = FindLIRById(Rec, guard->R);
 
     if (src == NULL) {
         return 0;
     }
 
-#define RETURN_IF(INST1, OP1, INST2, OP2) \
-    if ((INST1)->opcode == OPCODE_I##OP1 && (INST2)->opcode == OPCODE_I##OP2) {\
-        return 1;\
+#define RETURN_IF(INST1, OP1, INST2, OP2)                                           \
+    if (lir_opcode(INST1) == OPCODE_I##OP1 && lir_opcode(INST2) == OPCODE_I##OP2) { \
+        return 1;                                                                   \
     }
-
 
     RETURN_IF(inst, GuardTypeFixnum, src, LoadConstFixnum);
     RETURN_IF(inst, GuardTypeFloat,  src, LoadConstFloat);
     RETURN_IF(inst, GuardTypeRegexp, src, LoadConstRegexp);
 
-    if (inst->opcode == OPCODE_IGuardTypeFlonum) {
-        if (src->opcode == OPCODE_ILoadConstFloat) {
+    if (lir_opcode(inst) == OPCODE_IGuardTypeFlonum) {
+        if (lir_opcode(src) == OPCODE_ILoadConstFloat) {
             if (FLONUM_P(((ILoadConstFloat*)src)->Val)) {
                 return 1;
             }
         }
     }
 
-    if (inst->opcode == OPCODE_IGuardTypeArray) {
-        if (src->opcode == OPCODE_IAllocArray) {
+    if (lir_opcode(inst) == OPCODE_IGuardTypeArray) {
+        if (lir_opcode(src) == OPCODE_IAllocArray) {
             return 1;
         }
     }
 
-    if (inst->opcode == OPCODE_IGuardTypeString) {
-        if (src->opcode == OPCODE_ILoadConstString) {
+    if (lir_opcode(inst) == OPCODE_IGuardTypeString) {
+        if (lir_opcode(src) == OPCODE_ILoadConstString) {
             return 1;
         }
-        if (src->opcode == OPCODE_IAllocString) {
+        if (lir_opcode(src) == OPCODE_IAllocString) {
             return 1;
         }
     }
 
-    if (inst->opcode == OPCODE_IGuardTypeSpecialConst) {
-        switch (src->opcode) {
+    if (lir_opcode(inst) == OPCODE_IGuardTypeSpecialConst) {
+        switch (lir_opcode(src)) {
         case OPCODE_ILoadConstNil     :
         case OPCODE_ILoadConstBoolean :
         case OPCODE_ILoadConstFixnum  :
@@ -190,9 +203,9 @@ static int elimnate_guard(TraceRecorder *Rec, lir_compile_data_header_t *inst)
     return 0;
 }
 
-static int peephole(TraceRecorder *Rec, lir_compile_data_header_t *inst)
+static int peephole(TraceRecorder *Rec, lir_inst_t *inst)
 {
-    switch (inst->opcode) {
+    switch (lir_opcode(inst)) {
     case OPCODE_IGuardTypeFixnum      :
     case OPCODE_IGuardTypeFloat       :
     case OPCODE_IGuardTypeFlonum      :
@@ -230,25 +243,22 @@ case OPCODE_I##OPNAME: \
 }
 
 #if DUMP_LIR > 0
-static void dump_lir_inst(lir_compile_data_header_t *Inst);
+static void dump_lir_inst(lir_inst_t *Inst);
 #endif /* DUMP_LIR > 0*/
 
-static lir_compile_data_header_t *CreateInst(TraceRecorder *Rec,
-        lir_compile_data_header_t *inst,
-        size_t inst_size)
+static lir_inst_t *CreateInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size)
 {
-    lir_compile_data_header_t *buf = lir_alloc(Rec, inst_size);
-    int newid = buf->id;
+    lir_inst_t *buf = lir_alloc(Rec, inst_size);
+    long newid = lir_getid(buf);
     memcpy(buf, inst, inst_size);
-    buf->id = newid;
-    assert(buf->id != 0);
+    buf->base.id = newid;
+    assert(lir_getid(buf) != 0);
     return buf;
 }
 
-static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
-        size_t inst_size)
+static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size)
 {
-    lir_compile_data_header_t *buf;
+    lir_inst_t *buf;
     int opt;
     BasicBlock *bb = Rec->Block;
     if (!RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
@@ -262,9 +272,9 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
 
     if (bb->size == bb->capacity) {
         unsigned newsize = bb->capacity * 2;
-        bb->Insts = (lir_compile_data_header_t **)lir_realloc(
-                Rec, bb->Insts, sizeof(lir_compile_data_header_t *) * bb->capacity,
-                sizeof(lir_compile_data_header_t *) * newsize);
+        bb->Insts = (lir_inst_t **)lir_realloc(
+            Rec, bb->Insts, sizeof(lir_inst_t *) * bb->capacity,
+            sizeof(lir_inst_t *) * newsize);
         bb->capacity = newsize;
     }
 
@@ -274,17 +284,17 @@ static int AddInst(TraceRecorder *Rec, lir_compile_data_header_t *inst,
 #if DUMP_LIR > 1
     dump_lir_inst(buf);
 #endif
-    return buf->id;
+    return lir_getid(buf);
 }
 
 #if DUMP_LIR > 0
-static void dump_lir_inst(lir_compile_data_header_t *Inst)
+static void dump_lir_inst(lir_inst_t *Inst)
 {
 #define DUMP_IR(OPNAME)      \
 case OPCODE_I##OPNAME:   \
                          Dump_##OPNAME(Inst); \
     break;
-    switch (Inst->opcode) {
+    switch (lir_opcode(Inst)) {
         GWIR_EACH(DUMP_IR);
     default:
         assert(0 && "unreachable");
@@ -295,9 +305,9 @@ case OPCODE_I##OPNAME:   \
 static void dump_lir_block(BasicBlock *block)
 {
     unsigned i = 0;
-    fprintf(stderr, "BB%d (pc=%p)\n", block->base.id, block->start_pc);
+    fprintf(stderr, "BB%ld (pc=%p)\n", block_id(block), block->start_pc);
     for (i = 0; i < block->size; i++) {
-        lir_compile_data_header_t *Inst = block->Insts[i];
+        lir_inst_t *Inst = block->Insts[i];
         dump_lir_inst(Inst);
     }
 }

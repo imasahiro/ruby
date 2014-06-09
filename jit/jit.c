@@ -303,8 +303,10 @@ struct Trace {
     VALUE *LastPC;
     Trace *Parent;
     const rb_iseq_t *iseq;
-    unsigned ctr;
-    hashmap_t SideExit;
+    unsigned counter;
+    unsigned flag;
+    hashmap_t StackMap;
+    void *hdr;
 };
 
 static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
@@ -314,24 +316,24 @@ static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
     trace->StartPC = pc;
     trace->LastPC = NULL;
     trace->Parent = parent;
-    trace->ctr = 0;
+    trace->counter = 0;
     trace->iseq = iseq;
-    hashmap_init(&trace->SideExit, 1);
+    hashmap_init(&trace->StackMap, 1);
     return trace;
 }
 
 static void TraceReset(Trace *trace)
 {
-    if (hashmap_size(&trace->SideExit) > 0) {
-        hashmap_dispose(&trace->SideExit,
+    if (hashmap_size(&trace->StackMap) > 0) {
+        hashmap_dispose(&trace->StackMap,
                         (hashmap_entry_destructor_t)DeleteStackMap);
-        hashmap_init(&trace->SideExit, 1);
+        hashmap_init(&trace->StackMap, 1);
     }
 }
 
 static void TraceFree(Trace *trace)
 {
-    hashmap_dispose(&trace->SideExit,
+    hashmap_dispose(&trace->StackMap,
                     (hashmap_entry_destructor_t)DeleteStackMap);
     free(trace);
 }
@@ -617,7 +619,7 @@ static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)
     jit->CurrentTrace->Code = NULL;
     dump_lir(Rec);
     if (CountLIRInstSize(Rec) > GWIR_MIN_TRACE_LENGTH) {
-        jit->CurrentTrace->Code = TranslateToNativeCode(Rec);
+        TranslateToNativeCode(Rec);
     }
     jit->CurrentTrace = NULL;
     TraceRecorderClear(Rec, 0);
@@ -788,8 +790,8 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
     }
     /* trace head selection and start recording */
     if (trace) {
-        trace->ctr += 1;
-        if (trace->ctr > HOT_TRACE_THRESHOLD) {
+        trace->counter += 1;
+        if (trace->counter > HOT_TRACE_THRESHOLD) {
             RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
             TraceReset(trace);
             TraceRecorderClear(jit->Rec, 1);

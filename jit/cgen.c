@@ -367,7 +367,7 @@ static void PrepareSideExit(TraceRecorder *Rec, CGen *gen,
 {
     long j = 1;
     hashmap_iterator_t itr = { 0, 0 };
-    while (hashmap_next(&TraceRecorderGetTrace(Rec)->SideExit, &itr)) {
+    while (hashmap_next(&TraceRecorderGetTrace(Rec)->StackMap, &itr)) {
         VALUE *pc = (VALUE *)itr.entry->key;
         StackMap *stack = GetStackMap(Rec, pc);
         hashmap_set(SideExitBBs, (hashmap_data_t)pc, (j << 1));
@@ -534,6 +534,26 @@ static void Translate(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs,
     cgen_printf(gen, "}\n");
 }
 
+static void trace_freeze(TraceRecorder *Rec, Trace *trace)
+{
+    Trace *parent = trace->Parent;
+
+    hashmap_iterator_t itr = { 0, 0 };
+    while (hashmap_next(&trace->StackMap, &itr)) {
+        VALUE *pc = (VALUE *)itr.entry->key;
+        StackMap *stack = GetStackMap(Rec, pc);
+    }
+
+    if (parent == NULL) {
+        return;
+    }
+}
+
+int trace_sideexit_size(Trace *trace)
+{
+    return hashmap_size(&trace->StackMap);
+}
+
 static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
 {
     static int serial_id = 0;
@@ -541,8 +561,8 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
     char fname[128] = {};
     CGen gen;
     native_func_t ptr;
-
     int id = serial_id++;
+    Trace *trace = TraceRecorderGetTrace(Rec);
     if (id == 0) {
         gwjit_context_init();
     }
@@ -553,19 +573,18 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec)
     cgen_open(&gen, FILE_MODE, path, id);
 
     hashmap_t SideExitBBs;
-    hashmap_init(&SideExitBBs, 4);
+    hashmap_init(&SideExitBBs, trace_sideexit_size(trace));
 
     Translate(Rec, &gen, &SideExitBBs, id);
-
     cgen_freeze(&gen, id);
-
-    ptr = (native_func_t)cgen_get_function(&gen, fname);
+    trace->Code = (native_func_t)cgen_get_function(&gen, fname);
+    if (trace->Code) {
+        trace_freeze(Rec, trace);
+        FreezeInlineCache(&Rec->CacheMng);
+    }
 
     cgen_close(&gen);
     hashmap_dispose(&SideExitBBs, 0);
-    if (ptr) {
-        FreezeInlineCache(&Rec->CacheMng);
-    }
     return ptr;
 }
 

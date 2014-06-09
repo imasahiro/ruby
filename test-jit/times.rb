@@ -1,9 +1,7 @@
+i = 0
 j = 0
-30_000_000.times do |i|
-    j += 1
-    #if i > 0 && i % 2 == 0
-    #    break;
-    #end
-    #puts i
-end
+10.times { |i|  i += 1 }
+20.times { |i|  j += 1 }
+
+puts i
 puts j

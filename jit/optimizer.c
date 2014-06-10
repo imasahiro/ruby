@@ -243,42 +243,9 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *builder, lir_inst_t *inst)
 //    }
 //}
 
-static VALUE *get_target_pc_if_terminator(lir_inst_t *inst)
-{
-    switch (lir_opcode(inst)) {
-    case OPCODE_IJump:
-        return ((IJump *)inst)->TargetBB;
-        break;
-    case OPCODE_IJumpIf:
-        return ((IJumpIf *)inst)->TargetBB;
-        break;
-    default:
-        break;
-    }
-    return NULL;
-}
-
-static void link_basic_block(TraceRecorder *Rec, BasicBlock *entry_block)
-{
-    BasicBlock *target, *block = entry_block;
-    lir_inst_t *inst;
-    VALUE *pc;
-    while (block != NULL) {
-        assert(block->size > 0);
-        inst = block->Insts[block->size - 1];
-        pc = get_target_pc_if_terminator(inst);
-        assert(pc != NULL);
-        target = FindBasicBlockByPC(Rec, pc);
-        ((IJump *)inst)->TargetBB = (VALUEPtr)target;
-        inst->base.flag |= FLAG_BLOCK;
-        block = (BasicBlock *)block->base.next;
-    }
-}
-
 static void trace_optimize(TraceRecorder *Rec, Trace *trace)
 {
-    BasicBlock *entry_block = Rec->EntryBlock;
-    link_basic_block(Rec, entry_block);
+    //BasicBlock *entry_block = Rec->EntryBlock;
     //compute_usedef(builder, entry_block);
     //apply_worklist(builder, entry_block, constant_fold);
     //loop_invariant_code_motion(builder, entry_block);

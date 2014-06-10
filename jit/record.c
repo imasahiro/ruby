@@ -242,6 +242,20 @@ static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     _PUSH(EmitIR(AllocObject, klass, argc, argv));
 }
 
+static void EmitJump(TraceRecorder *Rec, VALUE *pc, int link)
+{
+    BasicBlock *bb = NULL;
+    if (link == 0) {
+        bb = CreateBlock(Rec, pc);
+    } else {
+        if ((bb = FindBasicBlockByPC(Rec, pc)) == NULL) {
+            bb = CreateBlock(Rec, pc);
+        }
+    }
+    EmitIR(Jump, bb);
+    Rec->Block = bb;
+}
+
 static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                            VALUE *reg_pc, CALL_INFO ci, rb_block_t *block,
                            reg_t Rblock, int opcode)
@@ -257,8 +271,7 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     // user defined ruby method
     if (ci->me && ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
         EmitPushFrame(Rec, reg_pc, ci, Rblock, block);
-        EmitIR(Jump, reg_pc);
-        CreateBlock(Rec, reg_pc);
+        EmitJump(Rec, reg_pc, 0);
         return;
     }
 
@@ -814,8 +827,7 @@ static void record_invokeblock(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     PushCallStack(Rec, argc, argv);
     _PUSH(EmitIR(FramePush, ci, 1, Rblock, argc, argv));
 
-    EmitIR(Jump, reg_pc);
-    CreateBlock(Rec, reg_pc);
+    EmitJump(Rec, reg_pc, 0);
 }
 
 static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
@@ -834,8 +846,7 @@ static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     PopCallStack(Rec);
 
     EmitIR(FramePop);
-    EmitIR(Jump, reg_pc);
-    CreateBlock(Rec, reg_pc);
+    EmitJump(Rec, reg_pc, 0);
     _PUSH(Val);
 }
 
@@ -850,10 +861,7 @@ static void record_jump(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 {
     OFFSET dst = (OFFSET)GET_OPERAND(1);
     VALUE *TargetPC = reg_pc + insn_len(BIN(jump)) + dst;
-    EmitIR(Jump, TargetPC);
-    if (FindBasicBlockByPC(Rec, TargetPC) == NULL) {
-        CreateBlock(Rec, TargetPC);
-    }
+    EmitJump(Rec, TargetPC, 1);
 }
 
 static void record_branchif(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
@@ -868,18 +876,11 @@ static void record_branchif(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     if (RTEST(val)) {
         TakeStackSnapshot(Rec, NextPC);
         EmitIR(GuardTypeNil, NextPC, Rval);
-        EmitIR(Jump, JumpPC);
-        if (FindBasicBlockByPC(Rec, JumpPC) == NULL) {
-            CreateBlock(Rec, JumpPC);
-        }
-
+        EmitJump(Rec, JumpPC, 1);
     } else {
         TakeStackSnapshot(Rec, JumpPC);
         EmitIR(GuardTypeNil, JumpPC, Rval);
-        EmitIR(Jump, NextPC);
-        if (FindBasicBlockByPC(Rec, NextPC) == NULL) {
-            CreateBlock(Rec, NextPC);
-        }
+        EmitJump(Rec, NextPC, 1);
     }
 }
 
@@ -903,10 +904,7 @@ static void record_branchunless(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
         TargetPC = NextPC;
     }
 
-    EmitIR(Jump, TargetPC);
-    if (FindBasicBlockByPC(Rec, TargetPC) == NULL) {
-        CreateBlock(Rec, TargetPC);
-    }
+    EmitJump(Rec, TargetPC, 1);
 }
 
 static void record_getinlinecache(TraceRecorder *Rec,

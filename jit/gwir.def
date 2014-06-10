@@ -142,8 +142,8 @@ PatternMatchRange :def :use (Pattern:reg_t, Target:reg_t, flag:rb_event_flag_t)
 
 # control flow
 Exit             (Exit:VALUEPtr)
-Jump             (TargetBB:VALUEPtr)
-JumpIf      :use (TargetBB:VALUEPtr, Cond:reg_t)
+Jump             (TargetBB:BasicBlockPtr)
+JumpIf      :use (TargetBB:BasicBlockPtr, Cond:reg_t)
 Throw  :def :use (Reg:reg_t)
 
 # function frame

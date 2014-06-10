@@ -1384,23 +1384,17 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         break;
     }
     case OPCODE_IJump: {
-        BasicBlock *BB;
         IJump *ir = (IJump *)Inst;
-        assert((ir->base.base.flag & FLAG_BLOCK) == FLAG_BLOCK);
-        BB = (BasicBlock *)ir->TargetBB;
-        cgen_printf(gen, "goto L_%ld;\n", block_id(BB));
+        cgen_printf(gen, "goto L_%ld;\n", block_id(ir->TargetBB));
         break;
     }
     case OPCODE_IJumpIf: {
-        BasicBlock *BB;
         IJumpIf *ir = (IJumpIf *)Inst;
-        assert((ir->base.base.flag & FLAG_BLOCK) == FLAG_BLOCK);
-        BB = (BasicBlock *)ir->TargetBB;
         assert(0 && "need test");
         cgen_printf(gen, "if (RTEST(v%ld)) {\n"
                          "    goto L_%ld;\n"
                          "}\n",
-                    ir->Cond, block_id(BB));
+                    ir->Cond, block_id(ir->TargetBB));
         break;
     }
     case OPCODE_IThrow: {

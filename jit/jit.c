@@ -613,17 +613,18 @@ static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc);
 static unsigned CountLIRInstSize(TraceRecorder *Rec);
 static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC);
 static reg_t Emit_Exit(TraceRecorder *Rec, VALUEPtr Exit);
-static reg_t Emit_Jump(TraceRecorder *Rec, VALUEPtr Exit);
+static reg_t Emit_Jump(TraceRecorder *Rec, BasicBlock *BB);
 static reg_t Emit_StackAdjust(TraceRecorder *Rec, int argc, RegPtr argv);
 
 static void TraceRecorderAppend(RJit *jit, TraceRecorder *Rec, Event *e)
 {
     Rec->CurrentEvent = e;
     if (Rec->EntryBlock == NULL) {
-        Rec->EntryBlock = CreateBlock(Rec, NULL);
+        Rec->EntryBlock = Rec->Block = CreateBlock(Rec, NULL);
         Emit_StackAdjust(Rec, 0, NULL);
-        Emit_Jump(Rec, e->pc);
-        Rec->Block = CreateBlock(Rec, e->pc);
+        BasicBlock *bb = CreateBlock(Rec, e->pc);
+        Emit_Jump(Rec, bb);
+        Rec->Block = bb;
     }
     dump_inst(e->cfp, e->pc);
     record_insn(jit, e);
@@ -636,11 +637,11 @@ static int TraceRecorderIsFull(TraceRecorder *Rec)
 
 static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)
 {
-    dump_lir(Rec);
     jit->CurrentTrace->Code = NULL;
     if (CountLIRInstSize(Rec) > GWIR_MIN_TRACE_LENGTH) {
         Trace *trace = TraceRecorderGetTrace(Rec);
         trace_optimize(Rec, trace);
+        dump_lir(Rec);
         TranslateToNativeCode(Rec, trace);
     }
     jit->CurrentTrace = NULL;

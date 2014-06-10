@@ -8,7 +8,6 @@
 
  **********************************************************************/
 
-#define FLAG_BLOCK (1 << 0)
 #define FMT(T) FMT_##T
 #define FMT_int "%d"
 #define FMT_long "%ld"
@@ -16,12 +15,12 @@
 #define FMT_RegPtr "%04ld"
 #define FMT_ID "%04ld"
 #define FMT_VALUE "0x%lx"
-#define FMT_VALUEPtr (((Inst)->base.flag & FLAG_BLOCK) ? "bb:%ld" : "0x%lx")
+#define FMT_VALUEPtr "%p"
 #define FMT_voidPtr "%p"
 #define FMT_CALL_INFO "%p"
 #define FMT_IC "%p"
 #define FMT_ISEQ "%p"
-#define FMT_BasicBlockPtr FMT_reg_t
+#define FMT_BasicBlockPtr "bb:%d"
 #define FMT_rb_event_flag_t "%lu"
 
 #define DATA(T, V) DATA_##T(V)
@@ -30,14 +29,12 @@
 #define DATA_reg_t(V) (V)
 #define DATA_RegPtr(V) (*(V))
 #define DATA_VALUE(V) (V)
-#define DATA_VALUEPtr(V) (((Inst)->base.flag & FLAG_BLOCK) \
-                              ? block_id((BasicBlock *)V)  \
-                              : ((long)V))
+#define DATA_VALUEPtr(V) (V)
 #define DATA_voidPtr(V) (V)
 #define DATA_CALL_INFO(V) (V)
 #define DATA_IC(V) (V)
 #define DATA_ISEQ(V) (V)
-#define DATA_BasicBlockPtr(V) (lir_getid(&(V)->base))
+#define DATA_BasicBlockPtr(V) ((V)->base.base.id)
 #define DATA_rb_event_flag_t(V) (V)
 
 typedef void *lir_folder_t;
@@ -76,8 +73,6 @@ static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc)
     if (Rec->Block != NULL) {
         Rec->Block->base.next = (lir_list_t *)bb;
     }
-
-    Rec->Block = bb;
     return bb;
 }
 

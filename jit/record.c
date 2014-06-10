@@ -830,11 +830,13 @@ static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
         return;
     }
     Rec->CallDepth -= 1;
+    reg_t Val = _POP();
     PopCallStack(Rec);
 
     EmitIR(FramePop);
     EmitIR(Jump, reg_pc);
     CreateBlock(Rec, reg_pc);
+    _PUSH(Val);
 }
 
 static void record_throw(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,

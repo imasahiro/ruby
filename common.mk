@@ -851,7 +851,7 @@ goruby.$(OBJEXT): {$(VPATH)}goruby.c {$(VPATH)}main.c $(RUBY_H_INCLUDES) \
 
 gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb
 	$(ECHO) creating $@
-	$(Q) $(BASERUBY) "$(srcdir)/jit/gwir.rb" $(srcdir)/jit/gwir.def > $@
+	$(Q) $(BASERUBY) "$(srcdir)/jit/gwir.rb" $(srcdir)/jit/gwir.def $(srcdir)/jit/gwir_template.h > $@
 
 yarv2gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/yarv2gwir.rb
 	$(ECHO) creating $@

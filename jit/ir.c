@@ -40,6 +40,8 @@
 #define DATA_BasicBlockPtr(V) (lir_getid(&(V)->base))
 #define DATA_rb_event_flag_t(V) (V)
 
+typedef void *lir_folder_t;
+
 static long lir_getid(lir_inst_t *ir)
 {
     return (long)ir->base.id;
@@ -140,90 +142,13 @@ static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size);
 
 #include "gwir.c"
 
-static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst)
-{
-    /* Remove guard that always true
-     * If we think following code, L2 is always true. So we can remove L2.
-     * L1 = LoadConstFixnum 10
-     * L2 = GuardTypeFixnum L1 exit_pc
-     */
-    IGuardTypeFixnum *guard = (IGuardTypeFixnum *) inst;
-    lir_inst_t *src = FindLIRById(Rec, guard->R);
-
-    if (src == NULL) {
-        return 0;
-    }
-
-#define RETURN_IF(INST1, OP1, INST2, OP2)                                           \
-    if (lir_opcode(INST1) == OPCODE_I##OP1 && lir_opcode(INST2) == OPCODE_I##OP2) { \
-        return 1;                                                                   \
-    }
-
-    RETURN_IF(inst, GuardTypeFixnum, src, LoadConstFixnum);
-    RETURN_IF(inst, GuardTypeFloat,  src, LoadConstFloat);
-    RETURN_IF(inst, GuardTypeRegexp, src, LoadConstRegexp);
-
-    if (lir_opcode(inst) == OPCODE_IGuardTypeFlonum) {
-        if (lir_opcode(src) == OPCODE_ILoadConstFloat) {
-            if (FLONUM_P(((ILoadConstFloat*)src)->Val)) {
-                return 1;
-            }
-        }
-    }
-
-    if (lir_opcode(inst) == OPCODE_IGuardTypeArray) {
-        if (lir_opcode(src) == OPCODE_IAllocArray) {
-            return 1;
-        }
-    }
-
-    if (lir_opcode(inst) == OPCODE_IGuardTypeString) {
-        if (lir_opcode(src) == OPCODE_ILoadConstString) {
-            return 1;
-        }
-        if (lir_opcode(src) == OPCODE_IAllocString) {
-            return 1;
-        }
-    }
-
-    if (lir_opcode(inst) == OPCODE_IGuardTypeSpecialConst) {
-        switch (lir_opcode(src)) {
-        case OPCODE_ILoadConstNil     :
-        case OPCODE_ILoadConstBoolean :
-        case OPCODE_ILoadConstFixnum  :
-        case OPCODE_ILoadConstFloat   :
-        case OPCODE_IGuardTypeNil     :
-        case OPCODE_IGuardTypeNonNil  :
-            return 1;
-        default:
-            break;
-        }
-    }
-
-    return 0;
-}
+static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst);
+static int is_guard(lir_inst_t *inst);
 
 static int peephole(TraceRecorder *Rec, lir_inst_t *inst)
 {
-    switch (lir_opcode(inst)) {
-    case OPCODE_IGuardTypeFixnum      :
-    case OPCODE_IGuardTypeFloat       :
-    case OPCODE_IGuardTypeFlonum      :
-    case OPCODE_IGuardTypeSpecialConst:
-    case OPCODE_IGuardTypeArray       :
-    case OPCODE_IGuardTypeString      :
-    case OPCODE_IGuardTypeHash        :
-    case OPCODE_IGuardTypeRegexp      :
-    case OPCODE_IGuardTypeTime        :
-    case OPCODE_IGuardTypeMath        :
-    case OPCODE_IGuardTypeObject      :
-    case OPCODE_IGuardTypeNil         :
-    case OPCODE_IGuardTypeNonNil      :
-        if (elimnate_guard(Rec, inst)) {
-            return -1;
-        }
-    default:
-        break;
+    if (is_guard(inst) && elimnate_guard(Rec, inst)) {
+        return -1;
     }
     return 0;
 }
@@ -251,14 +176,15 @@ static lir_inst_t *CreateInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_
     lir_inst_t *buf = lir_alloc(Rec, inst_size);
     long newid = lir_getid(buf);
     memcpy(buf, inst, inst_size);
-    buf->base.id = newid;
+    buf->base.id = (int) newid;
     assert(lir_getid(buf) != 0);
     return buf;
 }
 
+static lir_inst_t *constant_fold_inst(TraceRecorder *builder, lir_inst_t *inst);
+
 static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size)
 {
-    lir_inst_t *buf;
     int opt;
     BasicBlock *bb = Rec->Block;
     if (!RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
@@ -278,9 +204,12 @@ static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size)
         bb->capacity = newsize;
     }
 
-    buf = CreateInst(Rec, inst, inst_size);
-    bb->Insts[bb->size] = buf;
-    bb->size += 1;
+    lir_inst_t *buf = constant_fold_inst(Rec, inst);
+    if (buf == inst) {
+        buf = CreateInst(Rec, inst, inst_size);
+        bb->Insts[bb->size] = buf;
+        bb->size += 1;
+    }
 #if DUMP_LIR > 1
     dump_lir_inst(buf);
 #endif

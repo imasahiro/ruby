@@ -27,6 +27,7 @@
 #include "hashmap.c"
 #define GWJIT_HOST 1
 #include "jit_context.h"
+#include "gwir_template.h"
 
 VALUE rb_cMath = Qnil;
 

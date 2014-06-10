@@ -1,3 +1,12 @@
+/**********************************************************************
+
+  optimizer.c -
+
+  $Author$
+
+  Copyright (C) 2014 Masahiro Ide
+
+ **********************************************************************/
 
 typedef VALUE (*lir_folder1_t)(VALUE);
 typedef VALUE (*lir_folder2_t)(VALUE, VALUE);

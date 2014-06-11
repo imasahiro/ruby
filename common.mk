@@ -849,7 +849,7 @@ golf_prelude.$(OBJEXT): {$(VPATH)}golf_prelude.c $(RUBY_H_INCLUDES) \
 goruby.$(OBJEXT): {$(VPATH)}goruby.c {$(VPATH)}main.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}vm_debug.h {$(VPATH)}node.h $(hdrdir)/ruby.h
 
-gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb
+gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb {$(VPATH)}jit/gwir_template.h
 	$(ECHO) creating $@
 	$(Q) $(BASERUBY) "$(srcdir)/jit/gwir.rb" $(srcdir)/jit/gwir.def $(srcdir)/jit/gwir_template.h > $@
 

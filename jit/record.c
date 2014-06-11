@@ -271,7 +271,7 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     // user defined ruby method
     if (ci->me && ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
         EmitPushFrame(Rec, reg_pc, ci, Rblock, block);
-        EmitJump(Rec, reg_pc, 0);
+        //EmitJump(Rec, reg_pc, 0);
         return;
     }
 
@@ -827,7 +827,7 @@ static void record_invokeblock(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     PushCallStack(Rec, argc, argv);
     _PUSH(EmitIR(FramePush, ci, 1, Rblock, argc, argv));
 
-    EmitJump(Rec, reg_pc, 0);
+    //EmitJump(Rec, reg_pc, 0);
 }
 
 static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
@@ -846,7 +846,7 @@ static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     PopCallStack(Rec);
 
     EmitIR(FramePop);
-    EmitJump(Rec, reg_pc, 0);
+    //EmitJump(Rec, reg_pc, 0);
     _PUSH(Val);
 }
 

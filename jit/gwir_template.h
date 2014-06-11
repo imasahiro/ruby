@@ -228,4 +228,8 @@ static inline VALUE rb_jit_exec_IObjectToString(VALUE arg0)
 {
     return rb_obj_as_string(arg0);
 }
+static inline VALUE rb_jit_exec_IStringAdd(VALUE arg0, VALUE arg1)
+{
+    return rb_str_append(arg0, arg1);
+}
 #endif /* end of include guard */

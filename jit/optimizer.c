@@ -186,6 +186,31 @@ static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir
     return inst;
 }
 
+static lir_inst_t *fold_string_add(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
+{
+#if 0
+    lir_inst_t *LHS = *lir_inst_get_args(inst, 0);
+    lir_inst_t *RHS = *lir_inst_get_args(inst, 1);
+    // (StringAdd (AllocStr LoadConstString1) LoadConstString2)
+    // => (AllocStr LoadConstString3)
+    if (lir_opcode(LHS) == OPCODE_IAllocString) {
+        IAllocString *left = (IAllocString *) LHS;
+        if (lir_opcode(left->OrigStr) == OPCODE_ILoadConstString) {
+            ILoadConstString *lstr = (ILoadConstString *) left->OrigStr;
+            if (lir_opcode(RHS) == OPCODE_ILoadConstString) {
+                ILoadConstString *rstr = (ILoadConstString *) RHS;
+                VALUE val = ((lir_folder2_t)folder)(lstr->Val, rstr->Val);
+                lir_inst_t *tmp = EmitLoadConst(Rec, val);
+                asm volatile("int3");
+                return Emit_AllocString(Rec, tmp);
+            }
+        }
+    }
+#endif
+    return inst;
+}
+
+
 static lir_inst_t *add_const_pool(TraceRecorder *Rec, lir_inst_t *inst)
 {
     VALUE val;
@@ -279,6 +304,8 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
     case OPCODE_IFloatLt :
     case OPCODE_IFloatLe :
         return fold_binop_float2(Rec, folder, inst);
+    case OPCODE_IStringAdd :
+        return fold_string_add(Rec, folder, inst);
     case OPCODE_IStringConcat :
     case OPCODE_IArrayConcat :
     case OPCODE_IRegExpMatch :

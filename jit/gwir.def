@@ -77,6 +77,7 @@ MathLog2  :def :use :trans (Recv:lir_t)
 StringLength :def :use :trans (Recv:lir_t)
 StringEmptyP :def :use :trans (Recv:lir_t)
 StringConcat :def :use :trans (LHS:lir_t, RHS:lir_t)
+StringAdd    :def :use :trans (Recv:lir_t, Obj:lir_t)
 
 # array operator
 ArrayLength :def :use :trans (Recv:lir_t)

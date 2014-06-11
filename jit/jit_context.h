@@ -40,6 +40,7 @@ typedef struct gwjit_context {
     VALUE (*_rb_int2big)(SIGNED_VALUE);
     VALUE (*_rb_str_length)(VALUE);
     VALUE (*_rb_str_plus)(VALUE, VALUE);
+    VALUE (*_rb_str_append)(VALUE, VALUE);
     VALUE (*_rb_str_resurrect)(VALUE);
     VALUE (*_rb_range_new)(VALUE, VALUE, int);
     VALUE (*_rb_hash_new)();

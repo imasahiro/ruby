@@ -536,13 +536,9 @@ static void record_concatstrings(TraceRecorder *Rec,
     rb_num_t num = (rb_num_t)GET_OPERAND(1);
     rb_num_t i = num - 1;
 
-    lir_t argv[] = { NULL, NULL };
-    lir_t Rval;
-    argv[0] = EmitIR(AllocString, _TOPN(i));
-
+    lir_t Rval = EmitIR(AllocString, _TOPN(i));
     while (i-- > 0) {
-        argv[1] = _TOPN(i);
-        Rval = EmitIR(InvokeNative, rb_str_append, 2, argv);
+        Rval = EmitIR(StringAdd, Rval, _TOPN(i));
     }
     for (i = 0; i < num; i++) {
         _POP();

@@ -141,7 +141,7 @@ static lir_inst_t *fold_binop_float2(TraceRecorder *Rec, lir_folder_t folder, li
     int lop = lir_opcode(&LHS->base);
     int rop = lir_opcode(&RHS->base);
     // const + const
-    if (lop == OPCODE_ILoadConstFixnum && rop == OPCODE_ILoadConstFixnum) {
+    if (lop == OPCODE_ILoadConstFloat && rop == OPCODE_ILoadConstFloat) {
         // FIXME need to insert GuardTypeFlonum?
         VALUE val = ((lir_folder2_t)folder)(LHS->Val, RHS->Val);
         return Emit_LoadConstFloat(Rec, val);
@@ -149,7 +149,30 @@ static lir_inst_t *fold_binop_float2(TraceRecorder *Rec, lir_folder_t folder, li
     return inst;
 }
 
-static lir_inst_t *constant_fold_inst(TraceRecorder *builder, lir_inst_t *inst)
+static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val);
+
+static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
+{
+    IObjectToString *ir = (IObjectToString *)inst;
+    ILoadConstObject *Val = (ILoadConstObject *) ir->Val;
+    VALUE val = Qundef;
+    switch(lir_opcode(&Val->base)) {
+    case OPCODE_ILoadConstNil:
+    case OPCODE_ILoadConstObject:
+    case OPCODE_ILoadConstBoolean:
+    case OPCODE_ILoadConstFixnum:
+    case OPCODE_ILoadConstFloat:
+    case OPCODE_ILoadConstString:
+    case OPCODE_ILoadConstRegexp:
+        val = ((lir_folder1_t)folder)(Val->Val);
+        return EmitLoadConst(Rec, val);
+    default:
+        break;
+    }
+    return inst;
+}
+
+static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
 {
     if (is_guard(inst) || is_terminator(inst)) {
         return inst;
@@ -159,77 +182,75 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *builder, lir_inst_t *inst)
         return inst;
     }
 
-    //if (inst_operand_size(lir_opcode(inst)) == 1) {
-    //    //switch (lir_opcode(inst)) {
-    //    //case OPCODE_FixnumComplement :
-    //    //case OPCODE_FixnumToFloat :
-    //    //case OPCODE_FixnumToString :
-    //    //case OPCODE_FloatToFixnum :
-    //    //case OPCODE_FloatToString :
-    //    //case OPCODE_StringToFixnum :
-    //    //case OPCODE_StringToFloat :
-    //    //case OPCODE_MathSin :
-    //    //case OPCODE_MathCos :
-    //    //case OPCODE_MathTan :
-    //    //case OPCODE_MathExp :
-    //    //case OPCODE_MathSqrt :
-    //    //case OPCODE_MathLog10 :
-    //    //case OPCODE_MathLog2 :
-    //    //case OPCODE_StringLength :
-    //    //case OPCODE_StringEmptyP :
-    //    //case OPCODE_ArrayLength :
-    //    //case OPCODE_ArrayEmptyP :
-    //    //case OPCODE_ArrayGet :
-    //    //case OPCODE_HashLength :
-    //    //case OPCODE_HashEmptyP :
-    //    //case OPCODE_HashGet :
-    //    //}
+    switch (lir_opcode(inst)) {
+    //case OPCODE_IObjectToString:
+    //    return fold_binop_tostr(Rec, folder, inst);
+    //case OPCODE_FixnumComplement :
+    //case OPCODE_FixnumToFloat :
+    //case OPCODE_FixnumToString :
+    //case OPCODE_FloatToFixnum :
+    //case OPCODE_FloatToString :
+    //case OPCODE_StringToFixnum :
+    //case OPCODE_StringToFloat :
+    //case OPCODE_MathSin :
+    //case OPCODE_MathCos :
+    //case OPCODE_MathTan :
+    //case OPCODE_MathExp :
+    //case OPCODE_MathSqrt :
+    //case OPCODE_MathLog10 :
+    //case OPCODE_MathLog2 :
+    //case OPCODE_StringLength :
+    //case OPCODE_StringEmptyP :
+    //case OPCODE_ArrayLength :
+    //case OPCODE_ArrayEmptyP :
+    //case OPCODE_ArrayGet :
+    //case OPCODE_HashLength :
+    //case OPCODE_HashEmptyP :
+    //case OPCODE_HashGet :
+
+    case OPCODE_IFixnumAdd :
+    case OPCODE_IFixnumSub :
+    case OPCODE_IFixnumMul :
+    case OPCODE_IFixnumDiv :
+    case OPCODE_IFixnumMod :
+    case OPCODE_IFixnumAddOverflow :
+    case OPCODE_IFixnumSubOverflow :
+    case OPCODE_IFixnumMulOverflow :
+    case OPCODE_IFixnumDivOverflow :
+    case OPCODE_IFixnumModOverflow :
+    case OPCODE_IFixnumEq :
+    case OPCODE_IFixnumNe :
+    case OPCODE_IFixnumGt :
+    case OPCODE_IFixnumGe :
+    case OPCODE_IFixnumLt :
+    case OPCODE_IFixnumLe :
+    case OPCODE_IFixnumAnd :
+    case OPCODE_IFixnumOr :
+    case OPCODE_IFixnumXor :
+    case OPCODE_IFixnumLshift :
+    case OPCODE_IFixnumRshift :
+        return fold_binop_fixnum2(Rec, folder, inst);
+    case OPCODE_IFloatAdd :
+    case OPCODE_IFloatSub :
+    case OPCODE_IFloatMul :
+    case OPCODE_IFloatDiv :
+    case OPCODE_IFloatMod :
+    case OPCODE_IFloatEq :
+    case OPCODE_IFloatNe :
+    case OPCODE_IFloatGt :
+    case OPCODE_IFloatGe :
+    case OPCODE_IFloatLt :
+    case OPCODE_IFloatLe :
+        return fold_binop_float2(Rec, folder, inst);
+    case OPCODE_IStringConcat :
+    case OPCODE_IArrayConcat :
+    case OPCODE_IRegExpMatch :
+        break;
+    default :
+        break;
+    }
     //}
-    //else if (inst_operand_size(lir_opcode(inst)) == 2) {
-        switch (lir_opcode(inst)) {
-        case OPCODE_IFixnumAdd :
-        case OPCODE_IFixnumSub :
-        case OPCODE_IFixnumMul :
-        case OPCODE_IFixnumDiv :
-        case OPCODE_IFixnumMod :
-        case OPCODE_IFixnumAddOverflow :
-        case OPCODE_IFixnumSubOverflow :
-        case OPCODE_IFixnumMulOverflow :
-        case OPCODE_IFixnumDivOverflow :
-        case OPCODE_IFixnumModOverflow :
-        case OPCODE_IFixnumEq :
-        case OPCODE_IFixnumNe :
-        case OPCODE_IFixnumGt :
-        case OPCODE_IFixnumGe :
-        case OPCODE_IFixnumLt :
-        case OPCODE_IFixnumLe :
-        case OPCODE_IFixnumAnd :
-        case OPCODE_IFixnumOr :
-        case OPCODE_IFixnumXor :
-        case OPCODE_IFixnumLshift :
-        case OPCODE_IFixnumRshift :
-            return fold_binop_fixnum2(builder, folder, inst);
-        case OPCODE_IFloatAdd :
-        case OPCODE_IFloatSub :
-        case OPCODE_IFloatMul :
-        case OPCODE_IFloatDiv :
-        case OPCODE_IFloatMod :
-        case OPCODE_IFloatEq :
-        case OPCODE_IFloatNe :
-        case OPCODE_IFloatGt :
-        case OPCODE_IFloatGe :
-        case OPCODE_IFloatLt :
-        case OPCODE_IFloatLe :
-            return fold_binop_float2(builder, folder, inst);
-        case OPCODE_IStringConcat :
-        case OPCODE_IArrayConcat :
-        case OPCODE_IRegExpMatch :
-            break;
-        default :
-            break;
-        }
-    //}
-    return inst;
+return inst;
 }
 
 //static int constant_fold(worklist_t *list, TraceRecorder *builder, lir_inst_t *ir)

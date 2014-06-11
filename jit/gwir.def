@@ -56,6 +56,7 @@ FloatLt  :def :use :trans (LHS:lir_t, RHS:lir_t)
 FloatLe  :def :use :trans (LHS:lir_t, RHS:lir_t)
 
 # Converter
+ObjectToString :def :use :trans (Val:lir_t)
 FixnumToFloat  :def :use (Val:lir_t)
 FixnumToString :def :use (Val:lir_t)
 FloatToFixnum  :def :use (Val:lir_t)

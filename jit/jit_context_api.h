@@ -42,6 +42,7 @@
 #define rb_gvar_get (jit_context->_rb_gvar_get)
 #define rb_gvar_set (jit_context->_rb_gvar_set)
 #define rb_class_new_instance (jit_context->_rb_class_new_instance)
+#define rb_obj_as_string (jit_context->_rb_obj_as_string)
 
 #define make_no_method_exception jit_context->_make_no_method_exception
 #define rb_ary_entry jit_context->_rb_ary_entry

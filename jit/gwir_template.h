@@ -216,4 +216,16 @@ static inline VALUE rb_jit_exec_IFloatLe(VALUE arg0, VALUE arg1)
 {
     return (RFLOAT_VALUE(arg0) >= RFLOAT_VALUE(arg1))? Qtrue : Qfalse;
 }
+static inline VALUE rb_jit_exec_IFixnumToString(VALUE arg0)
+{
+    return rb_fix2str(arg0, 10);
+}
+//static inline VALUE rb_jit_exec_IFloatToString(VALUE arg0)
+//{
+//    return flo_to_s(arg0);
+//}
+static inline VALUE rb_jit_exec_IObjectToString(VALUE arg0)
+{
+    return rb_obj_as_string(arg0);
+}
 #endif /* end of include guard */

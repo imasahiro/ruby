@@ -72,6 +72,7 @@ DATA = [
 
   ["RegExpMatch", "opt_regexpmatch1|opt_regexpmatch2", "=~", [:String, :Regexp]],
 
+  ["ObjectToString", "tostring", "", [:String]],
   ["TimeSucc",    "opt_succ", "succ", [:Time]],
 
   ["GetPropertyName", "opt_send_simple", "#getter", [:Object]],
@@ -335,13 +336,15 @@ DATA.each.with_index { |op, i|
   param << opcode(yarvop)
   if mname == "#getter" || mname == "#setter"
     param << mtype(mname, :guard)
-  else
+  elsif !mname.empty?
     param << mid(mname)
   end
 
   param << argc(arg.length)
-  if arg.length > 0 && mname != "#getter" && mname != "#setter"
-    param << unredefined(arg[0].to_sym, mname, :guard)
+  if !mname.empty? && mname != "#getter" && mname != "#setter"
+    if arg.length > 0
+      param << unredefined(arg[0].to_sym, mname, :guard)
+    end
   end
 
   arg.map.with_index { |v, i|

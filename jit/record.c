@@ -545,8 +545,7 @@ static void record_concatstrings(TraceRecorder *Rec,
 static void record_tostring(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                             VALUE *reg_pc)
 {
-    lir_t argv[] = { _POP() };
-    lir_t Rval = EmitIR(InvokeNative, rb_obj_as_string, 1, argv);
+    lir_t Rval = EmitIR(ObjectToString, _POP());
     _PUSH(Rval);
 }
 

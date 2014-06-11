@@ -60,6 +60,7 @@ static void gwjit_context_init()
     jit_host_context._rb_ary_new = rb_ary_new;
     jit_host_context._rb_ary_new_from_values = rb_ary_new_from_values;
     jit_host_context._rb_class_new_instance = rb_class_new_instance;
+    jit_host_context._rb_obj_as_string = rb_obj_as_string;
 
     // internal APIs
     jit_host_context._rb_float_new_in_heap = rb_float_new_in_heap;
@@ -604,6 +605,10 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
         cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld, v%ld);\n",\
                 (VAL), lir_getid(LHS), lir_getid(RHS))
 
+#define EMIT_CODE1(GEN, OP, VAL, ARG) \
+        cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld);\n",\
+                (VAL), lir_getid(ARG))
+
 static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                            hashmap_t *SideExitBBs,
                            lir_inst_t *Inst)
@@ -904,8 +909,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     }
     case OPCODE_IFixnumComplement: {
         IFixnumComplement *ir = (IFixnumComplement *)Inst;
-        cgen_printf(gen, "v%ld = rb_jit_exec_IFixnumComplement(v%ld);\n",
-                Id, lir_getid(ir->Recv));
+        EMIT_CODE1(gen, IFixnumComplement, Id, ir->Recv);
         break;
     }
     case OPCODE_IFloatAdd: {
@@ -971,7 +975,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     }
     case OPCODE_IFixnumToString: {
         IFixnumToString *ir = (IFixnumToString *)Inst;
-        cgen_printf(gen, "v%ld = rb_fix2str(v%ld, 10);\n", Id, lir_getid(ir->Val));
+        EMIT_CODE1(gen, IFixnumToString, Id, ir->Val);
         break;
     }
     case OPCODE_IFloatToFixnum: {
@@ -982,7 +986,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     }
     case OPCODE_IFloatToString: {
         IFloatToString *ir = (IFloatToString *)Inst;
-        cgen_printf(gen, "v%ld = flo_to_s(v%ld);\n", Id, lir_getid(ir->Val));
+        assert(0 && "need to implement flo_to_s");
+        EMIT_CODE1(gen, IFloatToString, Id, ir->Val);
         break;
     }
     case OPCODE_IStringToFixnum: {
@@ -1122,6 +1127,11 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "  v%ld = rb_reg_match(v%ld, v%ld);\n", Id,
                 lir_getid(ir->Re),
                 lir_getid(ir->Str));
+        break;
+    }
+    case OPCODE_IObjectToString: {
+        IObjectToString *ir = (IObjectToString *)Inst;
+        EMIT_CODE1(gen, IObjectToString, Id, ir->Val);
         break;
     }
     case OPCODE_IAllocObject: {

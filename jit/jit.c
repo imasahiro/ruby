@@ -651,7 +651,6 @@ static int TraceRecorderIsFull(TraceRecorder *Rec)
 
 static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)
 {
-    jit->CurrentTrace->Code = NULL;
     if (CountLIRInstSize(Rec) > GWIR_MIN_TRACE_LENGTH) {
         Trace *trace = TraceRecorderGetTrace(Rec);
         trace_optimize(Rec, trace);
@@ -818,7 +817,7 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
     }
     /* trace dispatch */
     trace = FindTrace(jit, e->pc);
-    if (trace && trace->Code) {
+    if (trace && trace->Code && trace->Code != (void *) 0xdeadbeaf) {
         return Invoke(jit, th, trace, e);
     }
     /* identify potential trace head */
@@ -828,7 +827,8 @@ static VALUE *TraceSelection(RJit *jit, rb_thread_t *th, Event *e)
     /* trace head selection and start recording */
     if (trace) {
         trace->counter += 1;
-        if (trace->counter > HOT_TRACE_THRESHOLD) {
+        if (trace->Code != (void *) 0xdeadbeaf &&
+                trace->counter > HOT_TRACE_THRESHOLD) {
             RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
             TraceClear(trace, 1);
             TraceRecorderClear(jit->Rec, 1);

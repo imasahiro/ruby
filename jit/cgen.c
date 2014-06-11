@@ -263,7 +263,7 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
     gen->path = path;
 }
 
-static void cgen_freeze(CGen *gen, int id)
+static int cgen_freeze(CGen *gen, int id)
 {
     if (gen->buf.size > 0) {
         buffer_setnull(&gen->buf);
@@ -303,12 +303,13 @@ static void cgen_freeze(CGen *gen, int id)
         fclose(gen->fp);
         gen->fp = popen(cmd, "w");
     }
-    pclose(gen->fp);
+    int success = pclose(gen->fp);
 #if GWJIT_DUMP_COMPILE_LOG > 0
     fprintf(stderr, "native code generation time %llu\n",
             getTimeMilliSecond() - end);
 #endif
     gen->fp = NULL;
+    return success;
 }
 
 static void cgen_close(CGen *gen) { gen->hdr = NULL; }
@@ -582,11 +583,16 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
     hashmap_init(&SideExitBBs, trace_sideexit_size(trace));
 
     Translate(Rec, &gen, &SideExitBBs, id);
-    cgen_freeze(&gen, id);
-    trace->Code = (native_func_t)cgen_get_function(&gen, fname);
-    if (trace->Code) {
-        trace_freeze(Rec, trace);
-        FreezeInlineCache(&Rec->CacheMng);
+    int success = cgen_freeze(&gen, id);
+    if (success != 0) {
+        trace->Code = (void *) 0xdeadbeaf;
+    }
+    else {
+        trace->Code = (native_func_t)cgen_get_function(&gen, fname);
+        if (trace->Code) {
+            trace_freeze(Rec, trace);
+            FreezeInlineCache(&Rec->CacheMng);
+        }
     }
 
     cgen_close(&gen);

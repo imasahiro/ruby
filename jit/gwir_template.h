@@ -1,6 +1,7 @@
 #ifndef GWIR_TEMPLATE_H
 #define GWIR_TEMPLATE_H
 
+
 static inline VALUE rb_jit_exec_IFixnumAddOverflow(VALUE recv, VALUE obj)
 {
     VALUE val;
@@ -92,7 +93,7 @@ static inline VALUE rb_jit_exec_IFixnumModOverflow(VALUE recv, VALUE obj)
 
 static inline VALUE rb_jit_exec_IFixnumAdd(VALUE recv, VALUE obj)
 {
-    VALUE val = (recv + (obj & (~1)));
+    VALUE val = (recv + (obj & (~1))) | FIXNUM_FLAG;
     return val;
 }
 static inline VALUE rb_jit_exec_IFixnumSub(VALUE arg0, VALUE arg1)

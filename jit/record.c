@@ -55,7 +55,7 @@ static int vm_load_cache(VALUE obj, ID id, IC ic, rb_call_info_t *ci,
 #define _TOPN(N) TopRegister(Rec, (int)(N))
 #define _SET(N, REG) SetRegister(Rec, (int)(N), REG)
 
-static reg_t EmitConverter(TraceRecorder *Rec, VALUE val, reg_t Rval,
+static lir_t EmitConverter(TraceRecorder *Rec, VALUE val, lir_t Rval,
                            VALUE *reg_pc, int type)
 {
     if (FIXNUM_P(val)) {
@@ -89,12 +89,12 @@ static reg_t EmitConverter(TraceRecorder *Rec, VALUE val, reg_t Rval,
             return Rval;
         }
     }
-    return -1;
+    return NULL;
 }
 
-static reg_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
+static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
 {
-    reg_t Rval = -1;
+    lir_t Rval = NULL;
     if (NIL_P(val)) {
         Rval = EmitIR(LoadConstNil);
     } else if (val == Qtrue || val == Qfalse) {
@@ -113,33 +113,33 @@ static reg_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
         }
     }
 
-    if(Rval == -1) {
+    if(Rval == NULL) {
         Rval = EmitIR(LoadConstObject, val);
     }
     return Rval;
 }
 
-static reg_t EmitSpecialInst_FixnumSucc(TraceRecorder *Rec, CALL_INFO ci,
-                                        reg_t *regs)
+static lir_t EmitSpecialInst_FixnumSucc(TraceRecorder *Rec, CALL_INFO ci,
+                                        lir_t *regs)
 {
-    reg_t Robj = EmitIR(LoadConstFixnum, INT2FIX(1));
+    lir_t Robj = EmitIR(LoadConstFixnum, INT2FIX(1));
     return EmitIR(FixnumAddOverflow, regs[0], Robj);
 }
 
-static reg_t EmitSpecialInst_TimeSucc(TraceRecorder *Rec, CALL_INFO ci,
-                                      reg_t *regs)
+static lir_t EmitSpecialInst_TimeSucc(TraceRecorder *Rec, CALL_INFO ci,
+                                      lir_t *regs)
 {
     return Emit_InvokeNative(Rec, rb_time_succ, 1, regs);
 }
 
-static reg_t EmitSpecialInst_StringFreeze(TraceRecorder *Rec, CALL_INFO ci,
-                                          reg_t *regs)
+static lir_t EmitSpecialInst_StringFreeze(TraceRecorder *Rec, CALL_INFO ci,
+                                          lir_t *regs)
 {
     return _POP();
 }
 
-static reg_t EmitSpecialInst_GetPropertyName(TraceRecorder *Rec, CALL_INFO ci,
-                                             reg_t *regs)
+static lir_t EmitSpecialInst_GetPropertyName(TraceRecorder *Rec, CALL_INFO ci,
+                                             lir_t *regs)
 {
     VALUE obj = ci->recv;
     VALUE *reg_pc = Rec->CurrentEvent->pc;
@@ -149,8 +149,8 @@ static reg_t EmitSpecialInst_GetPropertyName(TraceRecorder *Rec, CALL_INFO ci,
     return Emit_GetPropertyName(Rec, regs[0], ci->aux.index - 1);
 }
 
-static reg_t EmitSpecialInst_SetPropertyName(TraceRecorder *Rec, CALL_INFO ci,
-                                             reg_t *regs)
+static lir_t EmitSpecialInst_SetPropertyName(TraceRecorder *Rec, CALL_INFO ci,
+                                             lir_t *regs)
 {
     VALUE obj = ci->recv;
     VALUE *reg_pc = Rec->CurrentEvent->pc;
@@ -160,19 +160,19 @@ static reg_t EmitSpecialInst_SetPropertyName(TraceRecorder *Rec, CALL_INFO ci,
     return Emit_SetPropertyName(Rec, regs[0], ci->aux.index - 1, regs[1]);
 }
 
-static reg_t EmitSpecialInst(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci,
+static lir_t EmitSpecialInst(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci,
                              enum ruby_vminsn_type opcode, VALUE *params,
-                             reg_t *regs)
+                             lir_t *regs)
 {
 #include "yarv2gwir.c"
-    return -1;
+    return NULL;
 }
 
 static void EmitSpecialInst0(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci,
-                             int opcode, VALUE *params, reg_t *regs)
+                             int opcode, VALUE *params, lir_t *regs)
 {
-    reg_t Rval = -1;
-    if ((Rval = EmitSpecialInst(Rec, pc, ci, opcode, params, regs)) == -1) {
+    lir_t Rval = NULL;
+    if ((Rval = EmitSpecialInst(Rec, pc, ci, opcode, params, regs)) == NULL) {
         vm_search_method(ci, params[0]);
         ci = CloneInlineCache(&Rec->CacheMng, ci);
         EmitIR(GuardMethodCache, pc, regs[0], ci);
@@ -183,7 +183,7 @@ static void EmitSpecialInst0(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci,
 
 static void PrepareInstructionArgument(TraceRecorder *Rec,
                                        rb_control_frame_t *reg_cfp, int argc,
-                                       VALUE *params, reg_t *regs)
+                                       VALUE *params, lir_t *regs)
 {
     int i;
     for (i = 0; i < argc + 1; i++) {
@@ -197,17 +197,17 @@ static void EmitSpecialInst1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 {
     TakeStackSnapshot(Rec, reg_pc);
     CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
-    reg_t regs[ci->argc + 1];
+    lir_t regs[ci->argc + 1];
     VALUE params[ci->argc + 1];
     PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
     EmitSpecialInst0(Rec, reg_pc, ci, opcode, params, regs);
 }
 
 static void EmitPushFrame(TraceRecorder *Rec, VALUE *reg_pc, CALL_INFO ci,
-                          reg_t Rblock, rb_block_t *block)
+                          lir_t Rblock, rb_block_t *block)
 {
     int i, argc = ci->argc + 1 /*recv*/;
-    reg_t argv[argc];
+    lir_t argv[argc];
     for (i = 0; i < argc; i++) {
         argv[i] = _TOPN(ci->argc - i);
     }
@@ -224,8 +224,8 @@ static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                             VALUE *reg_pc, CALL_INFO ci)
 {
     int i, argc = ci->argc;
-    reg_t argv[argc];
-    reg_t klass = _TOPN(ci->argc);
+    lir_t argv[argc];
+    lir_t klass = _TOPN(ci->argc);
 
     TakeStackSnapshot(Rec, reg_pc);
     if ((ci->flag & VM_CALL_ARGS_BLOCKARG) || ci->blockiseq != 0) {
@@ -258,15 +258,15 @@ static void EmitJump(TraceRecorder *Rec, VALUE *pc, int link)
 
 static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                            VALUE *reg_pc, CALL_INFO ci, rb_block_t *block,
-                           reg_t Rblock, int opcode)
+                           lir_t Rblock, int opcode)
 {
-    reg_t regs[ci->argc + 1];
+    lir_t regs[ci->argc + 1];
     VALUE params[ci->argc + 1];
 
     vm_search_method(ci, ci->recv = TOPN(ci->argc));
     ci = CloneInlineCache(&Rec->CacheMng, ci);
 
-    reg_t Rval = -1;
+    lir_t Rval = NULL;
 
     // user defined ruby method
     if (ci->me && ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
@@ -276,7 +276,7 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     }
 
     PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
-    if ((Rval = EmitSpecialInst(Rec, reg_pc, ci, opcode, params, regs)) != -1) {
+    if ((Rval = EmitSpecialInst(Rec, reg_pc, ci, opcode, params, regs)) != NULL) {
         _PUSH(Rval);
         return;
     }
@@ -291,7 +291,7 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     // check block_given?
     extern VALUE rb_f_block_given_p(void);
     if (check_cfunc(ci->me, rb_f_block_given_p)) {
-        reg_t Rrecv = EmitIR(LoadSelf);
+        lir_t Rrecv = EmitIR(LoadSelf);
         EmitIR(GuardMethodCache, reg_pc, Rrecv, ci);
         EmitIR(InvokeNative, rb_f_block_given_p, 0, NULL);
         return;
@@ -304,13 +304,13 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 
 static void _record_getlocal(TraceRecorder *Rec, rb_num_t level, lindex_t idx)
 {
-    reg_t Rval = EmitIR(EnvLoad, (int)level, (int)idx);
+    lir_t Rval = EmitIR(EnvLoad, (int)level, (int)idx);
     _PUSH(Rval);
 }
 
 static void _record_setlocal(TraceRecorder *Rec, rb_num_t level, lindex_t idx)
 {
-    reg_t Rval = _POP();
+    lir_t Rval = _POP();
     EmitIR(EnvStore, (int)level, (int)idx, Rval);
 }
 
@@ -357,7 +357,7 @@ static void record_getinstancevariable(TraceRecorder *Rec,
     IC ic = (IC)GET_OPERAND(2);
     ID id = (ID)GET_OPERAND(1);
     VALUE obj = GET_SELF();
-    reg_t Rrecv = EmitIR(LoadSelf);
+    lir_t Rrecv = EmitIR(LoadSelf);
 
     if (vm_load_cache(obj, id, ic, NULL, 0)) {
         TakeStackSnapshot(Rec, reg_pc);
@@ -376,7 +376,7 @@ static void record_setinstancevariable(TraceRecorder *Rec,
     IC ic = (IC)GET_OPERAND(2);
     ID id = (ID)GET_OPERAND(1);
     VALUE obj = GET_SELF();
-    reg_t Rrecv = EmitIR(LoadSelf);
+    lir_t Rrecv = EmitIR(LoadSelf);
 
     int cacheable = vm_load_cache(obj, id, ic, NULL, 0);
     if (cacheable) {
@@ -418,7 +418,7 @@ static void record_getglobal(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                              VALUE *reg_pc)
 {
     GENTRY entry = (GENTRY)GET_OPERAND(1);
-    reg_t Id = EmitLoadConst(Rec, entry);
+    lir_t Id = EmitLoadConst(Rec, entry);
     _PUSH(EmitIR(GetGlobal, Id));
 }
 
@@ -426,8 +426,8 @@ static void record_setglobal(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                              VALUE *reg_pc)
 {
     GENTRY entry = (GENTRY)GET_OPERAND(1);
-    reg_t Rval = _POP();
-    reg_t Id = EmitLoadConst(Rec, entry);
+    lir_t Rval = _POP();
+    lir_t Id = EmitLoadConst(Rec, entry);
     EmitIR(SetGlobal, Id, Rval);
 }
 
@@ -517,8 +517,8 @@ static void record_putstring(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                              VALUE *reg_pc)
 {
     VALUE val = (VALUE)GET_OPERAND(1);
-    reg_t argv[] = { EmitIR(LoadConstString, val) };
-    reg_t Rval = EmitIR(InvokeNative, rb_str_resurrect, 1, argv);
+    lir_t argv[] = { EmitIR(LoadConstString, val) };
+    lir_t Rval = EmitIR(InvokeNative, rb_str_resurrect, 1, argv);
     _PUSH(Rval);
 }
 
@@ -528,8 +528,8 @@ static void record_concatstrings(TraceRecorder *Rec,
     rb_num_t num = (rb_num_t)GET_OPERAND(1);
     rb_num_t i = num - 1;
 
-    reg_t argv[] = { _TOPN(i), _TOPN(i) };
-    reg_t Rval;
+    lir_t argv[] = { _TOPN(i), _TOPN(i) };
+    lir_t Rval;
     argv[0] = EmitIR(InvokeNative, rb_str_resurrect, 1, argv);
 
     while (i-- > 0) {
@@ -545,8 +545,8 @@ static void record_concatstrings(TraceRecorder *Rec,
 static void record_tostring(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                             VALUE *reg_pc)
 {
-    reg_t argv[] = { _POP() };
-    reg_t Rval = EmitIR(InvokeNative, rb_obj_as_string, 1, argv);
+    lir_t argv[] = { _POP() };
+    lir_t Rval = EmitIR(InvokeNative, rb_obj_as_string, 1, argv);
     _PUSH(Rval);
 }
 
@@ -556,8 +556,8 @@ static void record_toregexp(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     rb_num_t i;
     rb_num_t cnt = (rb_num_t)GET_OPERAND(2);
     rb_num_t opt = (rb_num_t)GET_OPERAND(1);
-    reg_t regs[cnt];
-    reg_t Rary;
+    lir_t regs[cnt];
+    lir_t Rary;
     for (i = 0; i < cnt; i++) {
         regs[cnt - i] = _POP();
     }
@@ -570,7 +570,7 @@ static void record_newarray(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                             VALUE *reg_pc)
 {
     rb_num_t i, num = (rb_num_t)GET_OPERAND(1);
-    reg_t argv[num];
+    lir_t argv[num];
     for (i = 0; i < num; i++) {
         argv[i] = _POP();
     }
@@ -581,8 +581,8 @@ static void record_duparray(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                             VALUE *reg_pc)
 {
     VALUE val = (VALUE)GET_OPERAND(1);
-    reg_t Rval = EmitLoadConst(Rec, val);
-    reg_t argv[] = { Rval };
+    lir_t Rval = EmitLoadConst(Rec, val);
+    lir_t argv[] = { Rval };
     _PUSH(EmitIR(InvokeNative, rb_ary_resurrect, 1, argv));
 }
 
@@ -608,7 +608,7 @@ static void record_newhash(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                            VALUE *reg_pc)
 {
     rb_num_t i, num = (rb_num_t)GET_OPERAND(1);
-    reg_t argv[num];
+    lir_t argv[num];
     for (i = num; i > 0; i -= 2) {
         argv[i - 1] = _POP(); // key
         argv[i - 2] = _POP(); // val
@@ -620,8 +620,8 @@ static void record_newrange(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                             VALUE *reg_pc)
 {
     rb_num_t flag = (rb_num_t)GET_OPERAND(1);
-    reg_t Rhigh = _POP();
-    reg_t Rlow = _POP();
+    lir_t Rhigh = _POP();
+    lir_t Rlow = _POP();
     _PUSH(EmitIR(AllocRange, Rlow, Rhigh, (int)flag));
 }
 
@@ -634,7 +634,7 @@ static void record_pop(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_dup(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                        VALUE *reg_pc)
 {
-    reg_t Rval = _POP();
+    lir_t Rval = _POP();
     _PUSH(Rval);
     _PUSH(Rval);
 }
@@ -643,7 +643,7 @@ static void record_dupn(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                         VALUE *reg_pc)
 {
     rb_num_t i, n = (rb_num_t)GET_OPERAND(1);
-    reg_t argv[n];
+    lir_t argv[n];
     // FIXME optimize
     for (i = 0; i < n; i++) {
         argv[i] = _TOPN(n - i - 1);
@@ -656,8 +656,8 @@ static void record_dupn(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_swap(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                         VALUE *reg_pc)
 {
-    reg_t Rval = _POP();
-    reg_t Robj = _POP();
+    lir_t Rval = _POP();
+    lir_t Robj = _POP();
     _PUSH(Robj);
     _PUSH(Rval);
 }
@@ -673,7 +673,7 @@ static void record_topn(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 {
     rb_num_t n = (rb_num_t)GET_OPERAND(1);
     assert(0 && "need to test");
-    reg_t Rval = _TOPN(n);
+    lir_t Rval = _TOPN(n);
     _PUSH(Rval);
 }
 
@@ -681,7 +681,7 @@ static void record_setn(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                         VALUE *reg_pc)
 {
     rb_num_t n = (rb_num_t)GET_OPERAND(1);
-    reg_t Rval = _POP();
+    lir_t Rval = _POP();
     _SET(n, Rval);
     _PUSH(Rval);
 }
@@ -704,8 +704,8 @@ static void record_defined(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_checkmatch(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                               VALUE *reg_pc)
 {
-    reg_t Rpattern = _POP();
-    reg_t Rtarget = _POP();
+    lir_t Rpattern = _POP();
+    lir_t Rtarget = _POP();
     rb_event_flag_t flag = (rb_event_flag_t)GET_OPERAND(1);
     enum vm_check_match_type checkmatch_type
         = (enum vm_check_match_type)(flag & VM_CHECKMATCH_TYPE_MASK);
@@ -733,7 +733,7 @@ static void record_send(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                         VALUE *reg_pc)
 {
     CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
-    reg_t Rblock = 0;
+    lir_t Rblock = 0;
     rb_block_t *block = NULL;
     ci->argc = ci->orig_argc;
     ci->blockptr = 0;
@@ -781,7 +781,7 @@ static void record_invokeblock(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 {
     CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
     int i, argc = 1 /*recv*/ + ci->orig_argc;
-    reg_t Rblock, argv[argc];
+    lir_t Rblock, argv[argc];
     TakeStackSnapshot(Rec, reg_pc);
 
     const rb_block_t *block = rb_vm_control_frame_block_ptr(reg_cfp);
@@ -842,7 +842,7 @@ static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
         return;
     }
     Rec->CallDepth -= 1;
-    reg_t Val = _POP();
+    lir_t Val = _POP();
     PopCallStack(Rec);
 
     EmitIR(FramePop);
@@ -868,7 +868,7 @@ static void record_branchif(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                             VALUE *reg_pc)
 {
     OFFSET dst = (OFFSET)GET_OPERAND(1);
-    reg_t Rval = _POP();
+    lir_t Rval = _POP();
     VALUE val = TOPN(0);
     VALUE *NextPC = reg_pc + insn_len(BIN(branchif));
     VALUE *JumpPC = NextPC + dst;
@@ -888,7 +888,7 @@ static void record_branchunless(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                                 VALUE *reg_pc)
 {
     OFFSET dst = (OFFSET)GET_OPERAND(1);
-    reg_t Rval = _POP();
+    lir_t Rval = _POP();
     VALUE val = TOPN(0);
     VALUE *NextPC = reg_pc + insn_len(BIN(branchunless));
     VALUE *JumpPC = NextPC + dst;
@@ -1025,7 +1025,7 @@ static void record_opt_aset_with(TraceRecorder *Rec,
                                  rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
     VALUE recv, key, val;
-    reg_t Robj, Rrecv, Rval;
+    lir_t Robj, Rrecv, Rval;
     CALL_INFO ci;
     TakeStackSnapshot(Rec, reg_pc);
     ci = (CALL_INFO)GET_OPERAND(1);
@@ -1037,7 +1037,7 @@ static void record_opt_aset_with(TraceRecorder *Rec,
     Robj = EmitIR(LoadConstString, key);
 
     VALUE params[] = { recv, key, val };
-    reg_t regs[] = { Rrecv, Robj, Rval };
+    lir_t regs[] = { Rrecv, Robj, Rval };
     EmitSpecialInst0(Rec, reg_pc, ci, BIN(opt_aset_with), params, regs);
 }
 
@@ -1045,7 +1045,7 @@ static void record_opt_aref_with(TraceRecorder *Rec,
                                  rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
     VALUE recv, key;
-    reg_t Robj, Rrecv;
+    lir_t Robj, Rrecv;
     CALL_INFO ci;
     TakeStackSnapshot(Rec, reg_pc);
     ci = (CALL_INFO)GET_OPERAND(1);
@@ -1055,7 +1055,7 @@ static void record_opt_aref_with(TraceRecorder *Rec,
     Robj = EmitIR(LoadConstString, key);
 
     VALUE params[] = { recv, key };
-    reg_t regs[] = { Rrecv, Robj };
+    lir_t regs[] = { Rrecv, Robj };
     EmitSpecialInst0(Rec, reg_pc, ci, BIN(opt_aref_with), params, regs);
 }
 
@@ -1096,9 +1096,9 @@ static void record_opt_regexpmatch1(TraceRecorder *Rec,
     VALUE obj = TOPN(0);
     VALUE r = GET_OPERAND(1);
     VALUE params[] = { obj, r };
-    reg_t RRe = EmitLoadConst(Rec, r);
-    reg_t Robj = _POP();
-    reg_t regs[] = { Robj, RRe };
+    lir_t RRe = EmitLoadConst(Rec, r);
+    lir_t Robj = _POP();
+    lir_t regs[] = { Robj, RRe };
     rb_call_info_t ci;
     ci.mid = idEqTilde;
     ci.flag = 0;
@@ -1113,10 +1113,10 @@ static void record_opt_regexpmatch2(TraceRecorder *Rec,
     TakeStackSnapshot(Rec, reg_pc);
     VALUE obj2 = TOPN(1);
     VALUE obj1 = TOPN(0);
-    reg_t Robj1 = _POP();
-    reg_t Robj2 = _POP();
+    lir_t Robj1 = _POP();
+    lir_t Robj2 = _POP();
     VALUE params[] = { obj2, obj1 };
-    reg_t regs[] = { Robj2, Robj1 };
+    lir_t regs[] = { Robj2, Robj1 };
     rb_call_info_t ci;
     ci.mid = idEqTilde;
     ci.flag = 0;
@@ -1179,7 +1179,7 @@ static void record_putobject_OP_INT2FIX_O_0_C_(TraceRecorder *Rec,
                                                rb_control_frame_t *reg_cfp,
                                                VALUE *reg_pc)
 {
-    reg_t Rval = EmitIR(LoadConstFixnum, INT2FIX(0));
+    lir_t Rval = EmitIR(LoadConstFixnum, INT2FIX(0));
     _PUSH(Rval);
 }
 
@@ -1187,7 +1187,7 @@ static void record_putobject_OP_INT2FIX_O_1_C_(TraceRecorder *Rec,
                                                rb_control_frame_t *reg_cfp,
                                                VALUE *reg_pc)
 {
-    reg_t Rval = EmitIR(LoadConstFixnum, INT2FIX(1));
+    lir_t Rval = EmitIR(LoadConstFixnum, INT2FIX(1));
     _PUSH(Rval);
 }
 

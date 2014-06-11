@@ -43,7 +43,7 @@ static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
         DeleteStackMap(map);
     }
 
-    map = (StackMap *)malloc(sizeof(StackMap) + sizeof(reg_t) * n);
+    map = (StackMap *)malloc(sizeof(StackMap) + sizeof(lir_t) * n);
     map->size = n;
     map->flag = TRACE_EXIT_SIDE_EXIT;
     if (RJitModeIs(Rec->jit, TRACE_MODE_EMIT_BACKWARD_BRANCH)) {
@@ -51,7 +51,7 @@ static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
     }
 
     for (i = begin, j = 0; i < end; i++) {
-        reg_t reg = Rec->RegStack[i];
+        lir_t reg = Rec->RegStack[i];
 #if DUMP_STACK_MAP > 0
         fprintf(stderr, "\t\t[%d] reg=%ld\n", i, reg);
 #endif
@@ -60,9 +60,9 @@ static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
     AddStackMap(Rec, PC, map);
 }
 
-static reg_t AdjustStack(TraceRecorder *Rec)
+static lir_t AdjustStack(TraceRecorder *Rec)
 {
-    reg_t Reg;
+    lir_t Reg;
     IStackAdjust *sa = (IStackAdjust *)Rec->EntryBlock->Insts[0];
     BasicBlock *PrevBB = Rec->Block;
     Rec->Block = Rec->EntryBlock;
@@ -110,14 +110,14 @@ static reg_t AdjustStack(TraceRecorder *Rec)
     return Reg;
 }
 
-static void PushRegister(TraceRecorder *Rec, reg_t Reg)
+static void PushRegister(TraceRecorder *Rec, lir_t Reg)
 {
     if (Rec->RegStackSize + GWIR_RESERVED_REGSTACK_SIZE
         == Rec->RegStackCapacity) {
         unsigned newsize = Rec->RegStackCapacity * 2;
-        reg_t *RegStack = (reg_t *)lir_realloc(
+        lir_t *RegStack = (lir_t *)lir_realloc(
             Rec, Rec->RegStack - GWIR_RESERVED_REGSTACK_SIZE,
-            sizeof(reg_t) * Rec->RegStackCapacity, sizeof(reg_t) * newsize);
+            sizeof(lir_t) * Rec->RegStackCapacity, sizeof(lir_t) * newsize);
         Rec->RegStack = RegStack + GWIR_RESERVED_REGSTACK_SIZE;
         Rec->RegStackCapacity = newsize;
     }
@@ -130,9 +130,9 @@ static void PushRegister(TraceRecorder *Rec, reg_t Reg)
 #endif
 }
 
-static reg_t PopRegister(TraceRecorder *Rec)
+static lir_t PopRegister(TraceRecorder *Rec)
 {
-    reg_t Reg;
+    lir_t Reg;
     if (Rec->RegStackSize == -1 * GWIR_RESERVED_REGSTACK_SIZE) {
         Event *e = Rec->CurrentEvent;
         TraceRecorderAbort(Rec, e->cfp, e->pc, TRACE_ERROR_REGSTACK_UNDERFLOW);
@@ -150,11 +150,11 @@ static reg_t PopRegister(TraceRecorder *Rec)
     return Reg;
 }
 
-static reg_t TopRegister(TraceRecorder *Rec, int n)
+static lir_t TopRegister(TraceRecorder *Rec, int n)
 {
     int i, idx = Rec->RegStackSize - n - 1;
     assert(idx < Rec->RegStackSize && idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
-    reg_t Reg = Rec->RegStack[idx];
+    lir_t Reg = Rec->RegStack[idx];
     TraceRecorderRecordBottom(Rec, idx);
     if (Reg == 0 && idx < 0) {
         for (i = idx; i < 0; i++) {
@@ -171,7 +171,7 @@ static reg_t TopRegister(TraceRecorder *Rec, int n)
     return Reg;
 }
 
-static void SetRegister(TraceRecorder *Rec, int n, reg_t Reg)
+static void SetRegister(TraceRecorder *Rec, int n, lir_t Reg)
 {
     int idx = Rec->RegStackSize - n - 1;
     assert(idx < Rec->RegStackSize && idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
@@ -205,7 +205,7 @@ static void PopCallStack(TraceRecorder *Rec)
 #endif
 }
 
-static void PushCallStack(TraceRecorder *Rec, int argc, reg_t args[])
+static void PushCallStack(TraceRecorder *Rec, int argc, lir_t args[])
 {
     int i;
     if (Rec->CallStackSize == Rec->CallStackCapacity) {

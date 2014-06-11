@@ -61,7 +61,7 @@ static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst)
      * L2 = GuardTypeFixnum L1 exit_pc
      */
     IGuardTypeFixnum *guard = (IGuardTypeFixnum *)inst;
-    lir_inst_t *src = FindLIRById(Rec, guard->R);
+    lir_inst_t *src = guard->R;
 
     if (src == NULL) {
         return 0;
@@ -121,14 +121,14 @@ static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst)
 static lir_inst_t *fold_binop_fixnum2(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
     IFixnumAdd *ir = (IFixnumAdd *) inst;
-    ILoadConstFixnum *LHS = (ILoadConstFixnum *) FindLIRById(Rec, ir->LHS);
-    ILoadConstFixnum *RHS = (ILoadConstFixnum *) FindLIRById(Rec, ir->RHS);
+    ILoadConstFixnum *LHS = (ILoadConstFixnum *) ir->LHS;
+    ILoadConstFixnum *RHS = (ILoadConstFixnum *) ir->RHS;
     int lop = lir_opcode(&LHS->base);
     int rop = lir_opcode(&RHS->base);
     // const + const
     if (lop == OPCODE_ILoadConstFixnum && rop == OPCODE_ILoadConstFixnum) {
         VALUE val = ((lir_folder2_t)folder)(LHS->Val, RHS->Val);
-        return FindLIRById(Rec, Emit_LoadConstFixnum(Rec, val));
+        return Emit_LoadConstFixnum(Rec, val);
     }
     return inst;
 }
@@ -136,15 +136,15 @@ static lir_inst_t *fold_binop_fixnum2(TraceRecorder *Rec, lir_folder_t folder, l
 static lir_inst_t *fold_binop_float2(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
     IFloatAdd *ir = (IFloatAdd *)inst;
-    ILoadConstFloat *LHS = (ILoadConstFloat *)FindLIRById(Rec, ir->LHS);
-    ILoadConstFloat *RHS = (ILoadConstFloat *)FindLIRById(Rec, ir->RHS);
+    ILoadConstFloat *LHS = (ILoadConstFloat *) ir->LHS;
+    ILoadConstFloat *RHS = (ILoadConstFloat *) ir->RHS;
     int lop = lir_opcode(&LHS->base);
     int rop = lir_opcode(&RHS->base);
     // const + const
     if (lop == OPCODE_ILoadConstFixnum && rop == OPCODE_ILoadConstFixnum) {
         // FIXME need to insert GuardTypeFlonum?
         VALUE val = ((lir_folder2_t)folder)(LHS->Val, RHS->Val);
-        return FindLIRById(Rec, Emit_LoadConstFloat(Rec, val));
+        return Emit_LoadConstFloat(Rec, val);
     }
     return inst;
 }

@@ -409,7 +409,7 @@ static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
         cgen_printf(gen, "th->cfp = reg_cfp = original_cfp;\n");
         cgen_printf(gen, "SET_SP(original_sp);\n");
         for (i = 0; i < stack->size; i++) {
-            lir_inst_t *Inst = FindLIRById(Rec, stack->regs[i]);
+            lir_inst_t *Inst = stack->regs[i];
             if (lir_opcode(Inst) == OPCODE_IFramePush) {
                 IFramePush *ir = (IFramePush *)Inst;
                 int offset = j - (ir->invokeblock ? 1 : 0);
@@ -417,7 +417,8 @@ static void EmitSideExit(TraceRecorder *Rec, CGen *gen, hashmap_t *SideExitBBs)
                 EmitFramePush(Rec, gen, ir);
                 j = 0;
             } else {
-                cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n", j, stack->regs[i]);
+                lir_inst_t *ir = stack->regs[i];
+                cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n", j, lir_getid(ir));
                 j++;
             }
         }
@@ -435,7 +436,7 @@ static void EmitFramePush(TraceRecorder *Rec, CGen *gen, IFramePush *ir)
                      "  CALL_INFO ci = (CALL_INFO) %p;\n",
                 ir->ci);
     for (i = begin; i < ir->argc; i++) {
-        cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n", i - begin, ir->argv[i]);
+        cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n", i - begin, lir_getid(ir->argv[i]));
     }
     cgen_printf(gen, "  SET_SP(GET_SP() + %d);\n", ir->argc - ir->invokeblock);
     if (ir->invokeblock) {
@@ -446,14 +447,14 @@ static void EmitFramePush(TraceRecorder *Rec, CGen *gen, IFramePush *ir)
                     "  jit_vm_call_block_setup(th, reg_cfp,\n"
                     "                          (rb_block_t *) v%ld, ci, %d);\n"
                     "  reg_cfp = th->cfp;\n",
-                    ir->argv[0], ir->block, ir->argc - 1);
+                    lir_getid(ir->argv[0]), lir_getid(ir->block), ir->argc - 1);
     } else {
         if (ir->block != 0) {
             cgen_printf(gen, "  ci->blockptr = (rb_block_t *) v%ld;\n"
                              "  assert(ci->blockptr != 0);\n"
                              "  ci->blockptr->iseq = ci->blockiseq;\n"
                              "  ci->blockptr->proc = 0;\n",
-                        ir->block);
+                        lir_getid(ir->block));
         }
         cgen_printf(gen,
                     "  jit_vm_call_iseq_setup_normal(th, reg_cfp, ci, %d);\n"
@@ -595,7 +596,7 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
 
 #define EMIT_CODE(GEN, OP, VAL, LHS, RHS) \
         cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld, v%ld);\n",\
-                (VAL), (LHS), (RHS))
+                (VAL), lir_getid(LHS), lir_getid(RHS))
 
 static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                            hashmap_t *SideExitBBs,
@@ -609,7 +610,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!FIXNUM_P(v%ld)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeFloat: {
@@ -618,7 +619,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RB_FLOAT_TYPE_P(v%ld))) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeFlonum: {
@@ -627,7 +628,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!FLONUM_P(v%ld)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeSpecialConst: {
@@ -636,7 +637,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!!SPECIAL_CONST_P(v%ld)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeArray: {
@@ -645,7 +646,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RBASIC_CLASS(v%ld) == jit_context->cArray)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeString: {
@@ -654,7 +655,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RBASIC_CLASS(v%ld) == jit_context->cString)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeHash: {
@@ -663,7 +664,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RBASIC_CLASS(v%ld) == jit_context->cHash)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeRegexp: {
@@ -672,7 +673,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RBASIC_CLASS(v%ld) == jit_context->cRegexp)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeTime: {
@@ -681,7 +682,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RBASIC_CLASS(v%ld) == jit_context->cTime)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeMath: {
@@ -690,7 +691,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RBASIC_CLASS(v%ld) == jit_context->cMath)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeObject: {
@@ -699,7 +700,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!(RB_TYPE_P(v%ld, T_OBJECT))) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeNil: {
@@ -708,7 +709,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!RTEST(v%ld)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardTypeNonNil: {
@@ -717,7 +718,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if(!!RTEST(v%ld)) {\n"
                          "  goto L_exit%ld;\n"
                          "}\n",
-                    ir->R, ExitBlockId);
+                    lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardBlockEqual: {
@@ -731,7 +732,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "    goto L_exit%ld;\n"
                          "  }\n"
                          "}\n",
-                    ir->R, block->iseq, ExitBlockId);
+                    lir_getid(ir->R), block->iseq, ExitBlockId);
         break;
     }
     case OPCODE_IGuardProperty: {
@@ -749,7 +750,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                 gen, "if(!(RCLASS_SERIAL(RBASIC(v%ld)->klass) == 0x%llx)) {\n"
                      "  goto L_exit%ld;\n"
                      "}\n",
-                ir->R, ci->ic_serial, ExitBlockId);
+                lir_getid(ir->R), ci->ic_serial, ExitBlockId);
         }
         break;
     }
@@ -764,7 +765,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
             "    goto L_exit%ld;\n"
             "  }\n"
             "}\n",
-            ir->ci, ir->R, ExitBlockId);
+            ir->ci, lir_getid(ir->R), ExitBlockId);
         break;
     }
     case OPCODE_IGuardMethodRedefine: {
@@ -787,40 +788,32 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     }
     case OPCODE_IFixnumAdd: {
         IFixnumAdd *ir = (IFixnumAdd *)Inst;
-        cgen_printf(gen, "  v%ld = ((v%ld + (v%ld & (~1)))) | FIXNUM_FLAG;\n",
-                    Id, ir->LHS, ir->RHS);
-        assert(0 && "not implemented");
+        EMIT_CODE(gen, IFixnumAdd, Id, ir->LHS, ir->RHS);
+        assert(0 && "need to test");
         break;
     }
     case OPCODE_IFixnumSub: {
         IFixnumSub *ir = (IFixnumSub *)Inst;
-        cgen_printf(gen,
-                    "  v%ld = LONG2FIX(FIX2LONG(v%ld) - FIX2LONG(v%ld));\n", Id,
-                    ir->LHS, ir->RHS);
-        assert(0 && "not implemented");
+        EMIT_CODE(gen, IFixnumSub, Id, ir->LHS, ir->RHS);
+        assert(0 && "need to test");
         break;
     }
     case OPCODE_IFixnumMul: {
         IFixnumMul *ir = (IFixnumMul *)Inst;
-        cgen_printf(gen,
-                    "  v%ld = LONG2FIX(FIX2LONG(v%ld) * FIX2LONG(v%ld));\n", Id,
-                    ir->LHS, ir->RHS);
-        assert(0 && "not implemented");
+        EMIT_CODE(gen, IFixnumMul, Id, ir->LHS, ir->RHS);
+        assert(0 && "need to test");
         break;
     }
     case OPCODE_IFixnumDiv: {
         IFixnumDiv *ir = (IFixnumDiv *)Inst;
-        cgen_printf(gen,
-                    "  v%ld = LONG2FIX(FIX2LONG(v%ld) / FIX2LONG(v%ld));\n", Id,
-                    ir->LHS, ir->RHS);
-        assert(0 && "not implemented");
+        EMIT_CODE(gen, IFixnumDiv, Id, ir->LHS, ir->RHS);
+        assert(0 && "need to test");
         break;
     }
     case OPCODE_IFixnumMod: {
         IFixnumMod *ir = (IFixnumMod *)Inst;
-        cgen_printf(gen,
-                    "  v%ld = LONG2FIX(FIX2LONG(v%ld) %% FIX2LONG(v%ld));\n",
-                    Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFixnumMod, Id, ir->LHS, ir->RHS);
+        assert(0 && "need to test");
         break;
     }
     case OPCODE_IFixnumAddOverflow: {
@@ -906,7 +899,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IFixnumComplement: {
         IFixnumComplement *ir = (IFixnumComplement *)Inst;
         cgen_printf(gen, "v%ld = rb_jit_exec_IFixnumComplement(v%ld);\n",
-                Id, ir->Recv);
+                Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IFloatAdd: {
@@ -967,153 +960,162 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IFixnumToFloat: {
         IFixnumToFloat *ir = (IFixnumToFloat *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM((double) FIX2LONG(v%ld));\n", Id,
-                    ir->Val);
+                    lir_getid(ir->Val));
         break;
     }
     case OPCODE_IFixnumToString: {
         IFixnumToString *ir = (IFixnumToString *)Inst;
-        cgen_printf(gen, "v%ld = rb_fix2str(v%ld, 10);\n", Id, ir->Val);
+        cgen_printf(gen, "v%ld = rb_fix2str(v%ld, 10);\n", Id, lir_getid(ir->Val));
         break;
     }
     case OPCODE_IFloatToFixnum: {
         IFloatToFixnum *ir = (IFloatToFixnum *)Inst;
         cgen_printf(gen, "v%ld = LONG2FIX((long)RFLOAT_VALUE(v%ld));\n", Id,
-                    ir->Val);
+                    lir_getid(ir->Val));
         break;
     }
     case OPCODE_IFloatToString: {
         IFloatToString *ir = (IFloatToString *)Inst;
-        cgen_printf(gen, "v%ld = flo_to_s(v%ld);\n", Id, ir->Val);
+        cgen_printf(gen, "v%ld = flo_to_s(v%ld);\n", Id, lir_getid(ir->Val));
         break;
     }
     case OPCODE_IStringToFixnum: {
         IStringToFixnum *ir = (IStringToFixnum *)Inst;
-        cgen_printf(gen, "v%ld = rb_str_to_inum(v%ld, 10, 0);\n", Id, ir->Val);
+        cgen_printf(gen, "v%ld = rb_str_to_inum(v%ld, 10, 0);\n", Id, lir_getid(ir->Val));
         break;
     }
     case OPCODE_IStringToFloat: {
         IStringToFloat *ir = (IStringToFloat *)Inst;
-        cgen_printf(gen, "v%ld = rb_str_to_dbl(v%ld, 0);\n", Id, ir->Val);
+        cgen_printf(gen, "v%ld = rb_str_to_dbl(v%ld, 0);\n", Id, lir_getid(ir->Val));
         break;
     }
     case OPCODE_IMathSin: {
         IMathSin *ir = (IMathSin *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM(sin(RFLOAT_VALUE(v%ld)));\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IMathCos: {
         IMathCos *ir = (IMathCos *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM(cos(RFLOAT_VALUE(v%ld)));\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IMathTan: {
         IMathTan *ir = (IMathTan *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM(tan(RFLOAT_VALUE(v%ld)));\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IMathExp: {
         IMathExp *ir = (IMathExp *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM(exp(RFLOAT_VALUE(v%ld)));\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IMathSqrt: {
         IMathSqrt *ir = (IMathSqrt *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM(sqrt(RFLOAT_VALUE(v%ld)));\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IMathLog10: {
         IMathLog10 *ir = (IMathLog10 *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM(log10(RFLOAT_VALUE(v%ld)));\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IMathLog2: {
         IMathLog2 *ir = (IMathLog2 *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM(log2(RFLOAT_VALUE(v%ld)));\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IStringLength: {
         IStringLength *ir = (IStringLength *)Inst;
-        cgen_printf(gen, "v%ld = rb_str_length(v%ld);\n", Id, ir->Recv);
+        cgen_printf(gen, "v%ld = rb_str_length(v%ld);\n", Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IStringEmptyP: {
         IStringEmptyP *ir = (IStringEmptyP *)Inst;
         cgen_printf(gen, "v%ld = (RSTRING_LEN(v%ld) == 0) ? Qtrue : Qfalse;\n",
-                    Id, ir->Recv);
+                    Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IStringConcat: {
         IStringConcat *ir = (IStringConcat *)Inst;
-        cgen_printf(gen, "v%ld = rb_str_plus(v%ld, v%ld);\n", Id, ir->LHS,
-                    ir->RHS);
+        cgen_printf(gen, "v%ld = rb_str_plus(v%ld, v%ld);\n", Id,
+                lir_getid(ir->LHS),
+                lir_getid(ir->RHS));
         break;
     }
     case OPCODE_IArrayLength: {
         IArrayLength *ir = (IArrayLength *)Inst;
-        cgen_printf(gen, "v%ld = LONG2NUM(RARRAY_LEN(v%ld));\n", Id, ir->Recv);
+        cgen_printf(gen, "v%ld = LONG2NUM(RARRAY_LEN(v%ld));\n",
+                Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IArrayEmptyP: {
         IArrayEmptyP *ir = (IArrayEmptyP *)Inst;
         cgen_printf(gen, "v%ld = (RARRAY_LEN(v%ld) == 0) ? Qtrue : Qfalse;\n",
-                    Id, ir->Recv);
+                    Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IArrayConcat: {
         IArrayConcat *ir = (IArrayConcat *)Inst;
-        cgen_printf(gen, "v%ld = rb_ary_plus(v%ld, v%ld);\n", Id, ir->LHS,
-                    ir->RHS);
+        cgen_printf(gen, "v%ld = rb_ary_plus(v%ld, v%ld);\n",
+                Id, lir_getid(ir->LHS),
+                    lir_getid(ir->RHS));
         break;
     }
     case OPCODE_IArrayGet: {
         IArrayGet *ir = (IArrayGet *)Inst;
         cgen_printf(gen, "v%ld = rb_ary_entry(v%ld, FIX2LONG(v%ld));\n", Id,
-                    ir->Recv, ir->Index);
+                    lir_getid(ir->Recv), lir_getid(ir->Index));
         break;
     }
     case OPCODE_IArraySet: {
         IArraySet *ir = (IArraySet *)Inst;
         cgen_printf(gen, "rb_ary_store(v%ld, FIX2LONG(v%ld), v%ld);\n"
                          "v%ld = v%ld;\n",
-                    ir->Recv, ir->Index, ir->Val, Id, ir->Val);
+                    lir_getid(ir->Recv),
+                    lir_getid(ir->Index),
+                    lir_getid(ir->Val), Id, lir_getid(ir->Val));
         break;
     }
     case OPCODE_IHashLength: {
         IHashLength *ir = (IHashLength *)Inst;
-        cgen_printf(gen, "v%ld = INT2FIX(RHASH_SIZE(v%ld));\n", Id, ir->Recv);
+        cgen_printf(gen, "v%ld = INT2FIX(RHASH_SIZE(v%ld));\n",
+                Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IHashEmptyP: {
         IHashEmptyP *ir = (IHashEmptyP *)Inst;
         cgen_printf(gen,
                     "v%ld = (RHASH_EMPTY_P(v%ld) == 0) ? Qtrue : Qfalse;\n", Id,
-                    ir->Recv);
+                    lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IHashGet: {
         IHashGet *ir = (IHashGet *)Inst;
-        cgen_printf(gen, "  v%ld = rb_hash_aref(v%ld, v%ld);\n", Id, ir->Recv,
-                    ir->Index);
+        cgen_printf(gen, "  v%ld = rb_hash_aref(v%ld, v%ld);\n",
+                Id, lir_getid(ir->Recv),
+                    lir_getid(ir->Index));
         break;
     }
     case OPCODE_IHashSet: {
         IHashSet *ir = (IHashSet *)Inst;
         cgen_printf(gen, "  rb_hash_aset(v%ld, v%ld, v%ld);\n"
                          "  v%ld = v%ld;\n",
-                    ir->Recv, ir->Index, ir->Val, Id, ir->Val);
+                    lir_getid(ir->Recv), lir_getid(ir->Index),
+                    lir_getid(ir->Val), Id, lir_getid(ir->Val));
         break;
     }
     case OPCODE_IRegExpMatch: {
         IRegExpMatch *ir = (IRegExpMatch *)Inst;
-        cgen_printf(gen, "  v%ld = rb_reg_match(v%ld, v%ld);\n", Id, ir->Re,
-                    ir->Str);
+        cgen_printf(gen, "  v%ld = rb_reg_match(v%ld, v%ld);\n", Id,
+                lir_getid(ir->Re),
+                lir_getid(ir->Str));
         break;
     }
     case OPCODE_IAllocObject: {
@@ -1124,11 +1126,11 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "  VALUE argv[%d];\n",
                     ir->argc, ir->argc);
         for (i = 0; i < ir->argc; i++) {
-            cgen_printf(gen, "argv[%d + 1] = v%ld;\n", i, ir->argv[i]);
+            cgen_printf(gen, "argv[%d + 1] = v%ld;\n", i, lir_getid(ir->argv[i]));
         }
         cgen_printf(gen, "  v%ld = rb_class_new_instance(num, argv, v%ld);\n"
                          "}\n",
-                    Id, ir->Klass);
+                    Id, lir_getid(ir->Klass));
         break;
     }
 
@@ -1140,7 +1142,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "  VALUE argv[%d];\n",
                     ir->argc, ir->argc);
         for (i = 0; i < ir->argc; i++) {
-            cgen_printf(gen, "argv[%d] = v%ld;\n", i, ir->argv[i]);
+            cgen_printf(gen, "argv[%d] = v%ld;\n", i, lir_getid(ir->argv[i]));
         }
         cgen_printf(gen, "  v%ld = rb_ary_new4(num, argv);\n"
                          "}\n",
@@ -1153,8 +1155,9 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "{\n"
                          "  VALUE val = rb_hash_new();\n");
         for (i = 0; i < ir->argc; i += 2) {
-            cgen_printf(gen, "rb_hash_aset(val, v%ld, v%ld);\n", ir->argv[i],
-                        ir->argv[i + 1]);
+            cgen_printf(gen, "rb_hash_aset(val, v%ld, v%ld);\n",
+                    lir_getid(ir->argv[i]),
+                    lir_getid(ir->argv[i + 1]));
         }
         cgen_printf(gen, "  v%ld = val;\n"
                          "}\n",
@@ -1175,7 +1178,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "  VALUE high = v%ld;\n"
                          "  v%ld = rb_range_new(low, high, flag);\n"
                          "}\n",
-                    ir->Flag, ir->Low, ir->High, Id);
+                    ir->Flag, lir_getid(ir->Low), lir_getid(ir->High), Id);
 
         break;
     }
@@ -1187,12 +1190,12 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
 
     case OPCODE_IGetGlobal: {
         IGetGlobal *ir = (IGetGlobal *)Inst;
-        cgen_printf(gen, "  v%ld = GET_GLOBAL(v%ld);\n", Id, ir->Entry);
+        cgen_printf(gen, "  v%ld = GET_GLOBAL(v%ld);\n", Id, lir_getid(ir->Entry));
         break;
     }
     case OPCODE_ISetGlobal: {
         ISetGlobal *ir = (ISetGlobal *)Inst;
-        cgen_printf(gen, "  SET_GLOBAL(v%ld, v%ld);\n", ir->Entry, ir->Val);
+        cgen_printf(gen, "  SET_GLOBAL(v%ld, v%ld);\n", lir_getid(ir->Entry), lir_getid(ir->Val));
         break;
     }
     case OPCODE_IGetPropertyName: {
@@ -1203,7 +1206,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "  VALUE *ptr = ROBJECT_IVPTR(obj);\n"
                          "  v%ld = ptr[index];\n"
                          "}\n",
-                    ir->Index, ir->Recv, Id);
+                    ir->Index, lir_getid(ir->Recv), Id);
         break;
     }
     case OPCODE_ISetPropertyName: {
@@ -1216,7 +1219,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "  RB_OBJ_WRITE(obj, &ptr[index], val);\n"
                          "  v%ld = ptr[index] = val;\n"
                          "}\n",
-                    ir->Index, ir->Recv, ir->Val, Id);
+                    ir->Index, lir_getid(ir->Recv), lir_getid(ir->Val), Id);
         break;
     }
     case OPCODE_ILoadSelf: {
@@ -1269,11 +1272,11 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                              "  }\n"
                              "  *(ep - %d) = v%ld;\n"
                              "}\n",
-                        ir->Level, ir->Index, ir->Val);
+                        ir->Level, ir->Index, lir_getid(ir->Val));
 
         } else {
             cgen_printf(gen, "  *(GET_EP() - %d) = v%ld;\n", ir->Index,
-                        ir->Val);
+                        lir_getid(ir->Val));
         }
         break;
     }
@@ -1315,7 +1318,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "  CALL_INFO ci = (CALL_INFO) %p;\n",
                     ir->ci);
         for (i = 0; i < ir->argc; i++) {
-            cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n", i, ir->argv[i]);
+            cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n",
+                    i, lir_getid(ir->argv[i]));
         }
         cgen_printf(
             gen,
@@ -1325,7 +1329,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
             "  assert(v%ld != Qundef && \"method must c-defined method\");\n"
             "  SET_SP(basesp);\n"
             "}\n",
-            ir->argc, ir->argv[0], Id, Id);
+            ir->argc, lir_getid(ir->argv[0]), Id, Id);
         break;
     }
     case OPCODE_IInvokeNative: {
@@ -1337,7 +1341,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
             if (i != 0) {
                 cgen_printf(gen, ", ");
             }
-            cgen_printf(gen, "v%ld", ir->argv[i]);
+            cgen_printf(gen, "v%ld", lir_getid(ir->argv[i]));
         }
         cgen_printf(gen, ");\n");
         break;
@@ -1357,7 +1361,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
             "  }\n"
             "  v%ld = result;\n"
             "}\n",
-            ir->flag, ir->Pattern, ir->Target, Id);
+            ir->flag, lir_getid(ir->Pattern), lir_getid(ir->Target), Id);
         break;
     }
 
@@ -1380,7 +1384,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                  "  }\n"
                  "  v%ld = result;\n"
                  "}\n",
-            ir->flag, ir->Pattern, ir->Target, Id);
+            ir->flag, lir_getid(ir->Pattern), lir_getid(ir->Target), Id);
         break;
     }
     case OPCODE_IJump: {
@@ -1394,7 +1398,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "if (RTEST(v%ld)) {\n"
                          "    goto L_%ld;\n"
                          "}\n",
-                    ir->Cond, block_id(ir->TargetBB));
+                    lir_getid(ir->Cond), block_id(ir->TargetBB));
         break;
     }
     case OPCODE_IThrow: {

@@ -79,7 +79,7 @@ open(ARGV[0]) { |file|
       puts "} I" + ir.name + ";\n\n"
 
       ## Emit_???
-      print "static reg_t Emit_#{ir.name}(TraceRecorder *Rec"
+      print "static lir_t Emit_#{ir.name}(TraceRecorder *Rec"
       ir.arg.each{|e|
         type = e.type
         name = e.name
@@ -97,7 +97,7 @@ open(ARGV[0]) { |file|
       end
 
       ir.arg.each{|e|
-        if e.variadic || e.type == "RegPtr"
+        if e.variadic || e.type == "LirPtr"
           puts "  int i;"
           puts "  for(i = 0; i < argc; i++) {"
           puts "    ir->#{e.name}[i] = #{e.name}[i];\n"
@@ -117,8 +117,8 @@ open(ARGV[0]) { |file|
 
       ## EmitSpecialInst_???
       if !ir.variadic and ir.trans
-        print "static reg_t EmitSpecialInst_#{ir.name}(TraceRecorder *Rec"
-        puts ", CALL_INFO ci, reg_t *regs)"
+        print "static lir_t EmitSpecialInst_#{ir.name}(TraceRecorder *Rec"
+        puts ", CALL_INFO ci, lir_t *regs)"
         puts "{\n"
         print "  return Emit_#{ir.name}(Rec"
         puts ir.arg.length.times.map {|i| ", regs[#{i}]" }.join("") + ");"
@@ -135,10 +135,10 @@ open(ARGV[0]) { |file|
         t = e.type
         n = e.name
         puts "  fprintf(stderr, \" #{n}:\");\n"
-        if e.variadic || e.type == "RegPtr"
+        if e.variadic || e.type == "LirPtr"
           puts "  int i_#{n};"
           puts "  for(i_#{n} = 0; i_#{n} < ir->argc; i_#{n}++) {"
-          if e.type == "RegPtr"
+          if e.type == "LirPtr"
             puts "    #{t} val = &ir->#{n}[i_#{n}];"
           else
             puts "    #{t} val = ir->#{n}[i_#{n}];"

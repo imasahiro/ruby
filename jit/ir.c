@@ -11,8 +11,8 @@
 #define FMT(T) FMT_##T
 #define FMT_int "%d"
 #define FMT_long "%ld"
-#define FMT_reg_t "%04ld"
-#define FMT_RegPtr "%04ld"
+#define FMT_lir_t "%04ld"
+#define FMT_LirPtr "%04ld"
 #define FMT_ID "%04ld"
 #define FMT_VALUE "0x%lx"
 #define FMT_VALUEPtr "%p"
@@ -26,8 +26,8 @@
 #define DATA(T, V) DATA_##T(V)
 #define DATA_int(V) (V)
 #define DATA_long(V) (V)
-#define DATA_reg_t(V) (V)
-#define DATA_RegPtr(V) (*(V))
+#define DATA_lir_t(V) (lir_getid(V))
+#define DATA_LirPtr(V) (lir_getid(*(V)))
 #define DATA_VALUE(V) (V)
 #define DATA_VALUEPtr(V) (V)
 #define DATA_voidPtr(V) (V)
@@ -41,7 +41,7 @@ typedef void *lir_folder_t;
 
 static long lir_getid(lir_inst_t *ir)
 {
-    return (long)ir->base.id;
+    return (ir != NULL) ? (long)ir->base.id : 0;
 }
 
 static int lir_opcode(lir_inst_t *ir)
@@ -71,7 +71,7 @@ static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc)
     bb->capacity = 1;
     bb->Insts = (lir_inst_t **)lir_alloc(Rec, sizeof(lir_inst_t *) * 1);
     if (Rec->Block != NULL) {
-        Rec->Block->base.next = (lir_list_t *)bb;
+        Rec->Block->base.next = (lir_linkedlist_t *)bb;
     }
     return bb;
 }
@@ -99,41 +99,28 @@ static unsigned CountLIRInstSize(TraceRecorder *Rec)
     return sum;
 }
 
-// FIXME this function is super slow!!!
-static lir_inst_t *FindLIRById(TraceRecorder *Rec, reg_t Reg)
-{
-    BasicBlock *block = Rec->EntryBlock;
-    while (block != NULL) {
-        unsigned i = 0;
-        for (i = 0; i < block->size; i++) {
-            if (lir_getid(block->Insts[i]) == Reg) {
-                return block->Insts[i];
-            }
-        }
-        block = (BasicBlock *)block->base.next;
-    }
-    return NULL;
-}
-
 static void *lir_inst_init(void *ptr, unsigned opcode)
 {
     lir_inst_t *inst = (lir_inst_t *)ptr;
     inst->base.id = 0;
     inst->base.flag = 0;
     inst->base.opcode = opcode;
+    inst->parent = NULL;
+    inst->args = NULL;
+    inst->user = NULL;
     return inst;
 }
 
-static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size);
+static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size);
 
 #define LIR_NEWINST(T) ((T *)lir_inst_init(alloca(sizeof(T)), OPCODE_##T))
 #define LIR_NEWINST_N(T, SIZE) \
-    ((T *)lir_inst_init(alloca(sizeof(T) + sizeof(reg_t) * (SIZE)), OPCODE_##T))
+    ((T *)lir_inst_init(alloca(sizeof(T) + sizeof(lir_t) * (SIZE)), OPCODE_##T))
 
 #define ADD_INST(REC, INST) ADD_INST_N(REC, INST, 0)
 
 #define ADD_INST_N(REC, INST, SIZE) \
-    AddInst(REC, &(INST)->base, sizeof(*INST) + sizeof(reg_t) * (SIZE))
+    AddInst(REC, &(INST)->base, sizeof(*INST) + sizeof(lir_t) * (SIZE))
 
 #include "gwir.c"
 
@@ -178,17 +165,17 @@ static lir_inst_t *CreateInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_
 
 static lir_inst_t *constant_fold_inst(TraceRecorder *builder, lir_inst_t *inst);
 
-static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size)
+static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size)
 {
     int opt;
     BasicBlock *bb = Rec->Block;
     if (!RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
-        return -1;
+        return NULL;
     }
 
     opt = peephole(Rec, inst);
     if (opt != 0) {
-        return opt;
+        return NULL;
     }
 
     if (bb->size == bb->capacity) {
@@ -208,7 +195,7 @@ static long AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size)
 #if DUMP_LIR > 1
     dump_lir_inst(buf);
 #endif
-    return lir_getid(buf);
+    return buf;
 }
 
 #if DUMP_LIR > 0
@@ -246,7 +233,8 @@ static void dump_side_exit(TraceRecorder *Rec)
         fprintf(stderr, "side exit(%d): pc=%p: %s ", stack->size, pc,
                 TraceStatusToStr(stack->flag));
         for (i = 0; i < stack->size; i++) {
-            fprintf(stderr, "  [%d] = %04ld;", i, stack->regs[i]);
+            lir_inst_t *inst = stack->regs[i];
+            fprintf(stderr, "  [%d] = %04ld;", i, lir_getid(inst));
         }
         fprintf(stderr, "\n");
     }

@@ -31,11 +31,8 @@
 
 VALUE rb_cMath = Qnil;
 
-typedef long reg_t;
-
 typedef VALUE *VALUEPtr;
 typedef void *voidPtr;
-typedef reg_t *RegPtr;
 
 struct Event;
 typedef struct TraceRecorder TraceRecorder;
@@ -48,22 +45,39 @@ typedef struct lir_compile_data_header {
     int id;
 } lir_compile_data_header_t;
 
+typedef struct lir_linkedlist_t {
+    lir_compile_data_header_t base;
+    struct lir_linkedlist_t *next;
+} lir_linkedlist_t;
+
+typedef struct lir_basic_block BasicBlock;
+typedef struct lir_inst_t      lir_inst_t;
+
 typedef struct lir_list_t {
     lir_compile_data_header_t base;
-    struct lir_list_t *next;
+    lir_inst_t *list;
+    unsigned size;
+    unsigned capacity;
 } lir_list_t;
 
-typedef struct lir_inst_t {
+struct lir_inst_t {
     lir_compile_data_header_t base;
-} lir_inst_t;
+    BasicBlock *parent;
+    lir_list_t *args;
+    lir_list_t *user;
+};
 
-typedef struct lir_basic_block {
-    lir_list_t base;
+typedef lir_inst_t *lir_t;
+typedef lir_t *LirPtr;
+
+struct lir_basic_block {
+    lir_linkedlist_t base;
     lir_inst_t **Insts;
     unsigned size;
     unsigned capacity;
     VALUE *start_pc;
-} BasicBlock;
+};
+
 typedef BasicBlock *BasicBlockPtr;
 
 enum JIT_BOP {
@@ -298,7 +312,7 @@ struct call_stack_struct {
 typedef struct Stackmap {
     int size;
     int flag;
-    reg_t regs[0];
+    lir_inst_t *regs[0];
 } StackMap;
 
 static StackMap *GetStackMap(TraceRecorder *Rec, VALUE *pc);
@@ -479,11 +493,11 @@ struct TraceRecorder {
     BasicBlock *Block;
     BasicBlock *EntryBlock;
 
-    lir_list_t *buffer_head;
-    lir_list_t *buffer_root;
+    lir_linkedlist_t *buffer_head;
+    lir_linkedlist_t *buffer_root;
     char *buffer_current;
 
-    reg_t *RegStack;
+    lir_t *RegStack;
     int RegStackBottom;
     int RegStackSize;
     int RegStackCapacity;
@@ -522,14 +536,14 @@ static void TraceRecorderDelete(TraceRecorder *Rec)
 static void *lir_alloc(TraceRecorder *Rec, size_t size)
 {
     lir_compile_data_header_t *ptr;
-    lir_list_t *storage = Rec->buffer_head;
+    lir_linkedlist_t *storage = Rec->buffer_head;
     if (BUFF_POS(storage) + size > BUFF_SIZE(storage)) {
         unsigned alloc_size = BUFF_SIZE(storage) * 2;
         while (alloc_size < size) {
             alloc_size *= 2;
         }
-        storage->next = (lir_list_t *)malloc(sizeof(lir_list_t) + alloc_size);
-        Rec->buffer_head = storage = (lir_list_t *)storage->next;
+        storage->next = (lir_linkedlist_t *)malloc(sizeof(lir_linkedlist_t) + alloc_size);
+        Rec->buffer_head = storage = (lir_linkedlist_t *)storage->next;
         storage->next = NULL;
         Rec->buffer_current = (char *)(storage + 1);
         BUFF_POS(storage) = 0;
@@ -560,19 +574,19 @@ static Trace *TraceRecorderGetTrace(TraceRecorder *Rec)
 
 static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
 {
-    lir_list_t *storage = Rec->buffer_head;
+    lir_linkedlist_t *storage = Rec->buffer_head;
     Rec->Block = NULL;
     Rec->EntryBlock = NULL;
     Rec->LastInstId = 0;
     Rec->buffer_head = NULL;
     Rec->buffer_current = NULL;
     while (storage != NULL) {
-        lir_list_t *next = storage->next;
+        lir_linkedlist_t *next = storage->next;
         free(storage);
         storage = next;
     }
     if (AllocBuffer) {
-        Rec->buffer_head = malloc(sizeof(lir_list_t)
+        Rec->buffer_head = malloc(sizeof(lir_linkedlist_t)
                                   + LIR_COMPILE_DATA_BUFF_SIZE);
         BUFF_POS(Rec->buffer_head) = 0;
         BUFF_SIZE(Rec->buffer_head) = LIR_COMPILE_DATA_BUFF_SIZE;
@@ -586,10 +600,10 @@ static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
     Rec->RegStackCapacity = 0;
     Rec->RegStack = NULL;
     if (AllocBuffer) {
-        reg_t *RegStack;
+        lir_t *RegStack;
         Rec->RegStackCapacity = GWIR_RESERVED_REGSTACK_SIZE + 1;
         RegStack
-            = (reg_t *)lir_alloc(Rec, sizeof(reg_t) * Rec->RegStackCapacity);
+            = (lir_t *)lir_alloc(Rec, sizeof(lir_t) * Rec->RegStackCapacity);
         Rec->RegStack = RegStack + GWIR_RESERVED_REGSTACK_SIZE;
     }
 
@@ -612,9 +626,9 @@ static void dump_inst(rb_control_frame_t *reg_cfp, VALUE *reg_pc);
 static BasicBlock *CreateBlock(TraceRecorder *Rec, VALUE *pc);
 static unsigned CountLIRInstSize(TraceRecorder *Rec);
 static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC);
-static reg_t Emit_Exit(TraceRecorder *Rec, VALUEPtr Exit);
-static reg_t Emit_Jump(TraceRecorder *Rec, BasicBlock *BB);
-static reg_t Emit_StackAdjust(TraceRecorder *Rec, int argc, RegPtr argv);
+static lir_t Emit_Exit(TraceRecorder *Rec, VALUEPtr Exit);
+static lir_t Emit_Jump(TraceRecorder *Rec, BasicBlock *BB);
+static lir_t Emit_StackAdjust(TraceRecorder *Rec, int argc, LirPtr argv);
 
 static void TraceRecorderAppend(RJit *jit, TraceRecorder *Rec, Event *e)
 {

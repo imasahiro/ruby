@@ -517,9 +517,8 @@ static void record_putstring(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                              VALUE *reg_pc)
 {
     VALUE val = (VALUE)GET_OPERAND(1);
-    lir_t argv[] = { EmitIR(LoadConstString, val) };
-    lir_t Rval = EmitIR(InvokeNative, rb_str_resurrect, 1, argv);
-    _PUSH(Rval);
+    lir_t Rstr = EmitIR(LoadConstString, val);
+    _PUSH(EmitIR(AllocString, Rstr));
 }
 
 static void record_concatstrings(TraceRecorder *Rec,
@@ -528,9 +527,9 @@ static void record_concatstrings(TraceRecorder *Rec,
     rb_num_t num = (rb_num_t)GET_OPERAND(1);
     rb_num_t i = num - 1;
 
-    lir_t argv[] = { _TOPN(i), _TOPN(i) };
+    lir_t argv[] = { NULL, NULL };
     lir_t Rval;
-    argv[0] = EmitIR(InvokeNative, rb_str_resurrect, 1, argv);
+    argv[0] = EmitIR(AllocString, _TOPN(i));
 
     while (i-- > 0) {
         argv[1] = _TOPN(i);

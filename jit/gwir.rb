@@ -14,14 +14,15 @@ class IRArgument
 end
 
 class OP
-  attr_accessor :name, :def, :use, :arg, :variadic, :trans
-  def initialize(name, has_def, has_use, trans, arg)
+  attr_accessor :name, :def, :use, :arg, :variadic, :trans, :opcode
+  def initialize(name, has_def, has_use, trans, arg, opcode)
     @name = name
     @def = has_def == ":def"
     @use = has_use == ":use"
     @trans = trans == ":trans"
     @arg = []
     @variadic = false
+    @opcode = opcode
     parse_arg(arg)
   end
 
@@ -53,113 +54,153 @@ open(ARGV[0]) { |file|
       trans   = $4
       arg  = $5
 
-      ir = OP.new($1, $2, $3, $4, $5)
+      ir = OP.new($1, $2, $3, $4, $5, i)
       irs.push(ir)
-      ##
-      puts "#define OPCODE_I#{ir.name}   #{i}\n"
-      puts "typedef struct I#{ir.name} {\n"
-      puts "  lir_inst_t base;"
-      ir.arg.each{|e|
-        type = e.type
-        name = e.name
-        if e.variadic
-          name = name + "[0]"
-        end
-        puts "  #{type} #{name};\n"
-      }
-      list = []
-      if arg.length > 0
-        fields = arg.split(",").map(&:strip)
-        for f in fields
-          v = f.split(":")
-          list.push(v[1])
-          list.push(v[0])
-        end
-      end
-      puts "} I" + ir.name + ";\n\n"
-
-      ## Emit_???
-      print "static lir_t Emit_#{ir.name}(TraceRecorder *Rec"
-      ir.arg.each{|e|
-        type = e.type
-        name = e.name
-        if e.variadic
-          name = name + "[]"
-        end
-        print ", #{type} #{name}"
-      }
-
-      puts ")\n{\n"
-      if ir.variadic
-        puts "  I#{ir.name} *ir = LIR_NEWINST_N(I#{ir.name}, argc);\n"
-      else
-        puts "  I#{ir.name} *ir = LIR_NEWINST(I#{ir.name});\n"
-      end
-
-      ir.arg.each{|e|
-        if e.variadic || e.type == "LirPtr"
-          puts "  int i;"
-          puts "  for(i = 0; i < argc; i++) {"
-          puts "    ir->#{e.name}[i] = #{e.name}[i];\n"
-          puts "  }"
-        else
-          puts "  ir->#{e.name} = #{e.name};\n"
-        end
-      }
-
-      if ir.variadic
-        puts "  return ADD_INST_N(Rec, ir, argc);\n"
-      else
-        puts "  return ADD_INST(Rec, ir);\n"
-      end
-
-      puts "}\n"
-
-      ## EmitSpecialInst_???
-      if !ir.variadic and ir.trans
-        print "static lir_t EmitSpecialInst_#{ir.name}(TraceRecorder *Rec"
-        puts ", CALL_INFO ci, lir_t *regs)"
-        puts "{\n"
-        print "  return Emit_#{ir.name}(Rec"
-        puts ir.arg.length.times.map {|i| ", regs[#{i}]" }.join("") + ");"
-        puts "}\n"
-      end
-
-      puts "#if DUMP_LIR > 0"
-      print "static void Dump_#{ir.name}(lir_inst_t *Inst)\n"
-      puts "{\n"
-      puts "  I#{ir.name} *ir = (I#{ir.name} *)Inst;\n"
-      puts "  fprintf(stderr, \"  \" FMT_ID \" #{ir.name}\", lir_getid(&ir->base));"
-
-      ir.arg.each{|e|
-        t = e.type
-        n = e.name
-        puts "  fprintf(stderr, \" #{n}:\");\n"
-        if e.variadic || e.type == "LirPtr"
-          puts "  int i_#{n};"
-          puts "  for(i_#{n} = 0; i_#{n} < ir->argc; i_#{n}++) {"
-          if e.type == "LirPtr"
-            puts "    #{t} val = &ir->#{n}[i_#{n}];"
-          else
-            puts "    #{t} val = ir->#{n}[i_#{n}];"
-          end
-          puts "    fprintf(stderr, \" \" FMT(#{t}), DATA(#{t}, val));\n"
-          puts "  }"
-        else
-          puts "  fprintf(stderr, FMT(#{t}), DATA(#{t}, ir->#{n}));\n"
-        end
-      }
-
-      puts "  fprintf(stderr, \"\\n\");"
-      puts "}\n"
-      puts "#endif /*DUMP_LIR > 0*/"
-
-      puts "#define GWIR_USE_#{ir.name} #{ir.def ? 1 : 0}"
-      puts "#define GWIR_DEF_#{ir.name} #{ir.use ? 1 : 0}"
-
       i += 1
     end
   end
+}
+
+def define_struct(ir)
+  puts "#define OPCODE_I#{ir.name} #{ir.opcode}\n"
+  puts "#define GWIR_USE_#{ir.name} #{ir.def ? 1 : 0}"
+  puts "#define GWIR_DEF_#{ir.name} #{ir.use ? 1 : 0}"
+  puts "typedef struct I#{ir.name} {\n"
+  puts "  lir_inst_t base;"
+  ir.arg.each{|e|
+    type = e.type
+    name = e.name
+    if e.variadic
+      name = name + "[0]"
+    end
+    puts "  #{type} #{name};\n"
+  }
+  puts "} I" + ir.name + ";\n\n"
+end
+
+def emit_ir(ir)
+  print "static lir_t Emit_#{ir.name}(TraceRecorder *Rec"
+  ir.arg.each{|e|
+    type = e.type
+    name = e.name
+    if e.variadic
+      name = name + "[]"
+    end
+    print ", #{type} #{name}"
+  }
+
+  puts ")\n{\n"
+  if ir.variadic
+    puts "  I#{ir.name} *ir = LIR_NEWINST_N(I#{ir.name}, argc);\n"
+  else
+    puts "  I#{ir.name} *ir = LIR_NEWINST(I#{ir.name});\n"
+  end
+
+  ir.arg.each{|e|
+    if e.variadic || e.type == "LirPtr"
+      puts "  int i;"
+      puts "  for(i = 0; i < argc; i++) {"
+      puts "    ir->#{e.name}[i] = #{e.name}[i];\n"
+      puts "  }"
+    else
+      puts "  ir->#{e.name} = #{e.name};\n"
+    end
+  }
+
+  if ir.variadic
+    puts "  return ADD_INST_N(Rec, ir, argc);\n"
+  else
+    puts "  return ADD_INST(Rec, ir);\n"
+  end
+
+  puts "}\n"
+end
+
+def dump_ir(ir)
+  puts "#if DUMP_LIR > 0"
+  print "static void Dump_#{ir.name}(lir_inst_t *Inst)\n"
+  puts "{\n"
+  puts "  I#{ir.name} *ir = (I#{ir.name} *)Inst;\n"
+  puts "  fprintf(stderr, \"  \" FMT_ID \" #{ir.name}\", lir_getid(&ir->base));"
+
+  ir.arg.each{|e|
+    t = e.type
+    n = e.name
+    puts "  fprintf(stderr, \" #{n}:\");\n"
+    if e.variadic || e.type == "LirPtr"
+      puts "  int i_#{n};"
+      puts "  for(i_#{n} = 0; i_#{n} < ir->argc; i_#{n}++) {"
+      if e.type == "LirPtr"
+        puts "    #{t} val = &ir->#{n}[i_#{n}];"
+      else
+        puts "    #{t} val = ir->#{n}[i_#{n}];"
+      end
+      puts "    fprintf(stderr, \" \" FMT(#{t}), DATA(#{t}, val));\n"
+      puts "  }"
+    else
+      puts "  fprintf(stderr, FMT(#{t}), DATA(#{t}, ir->#{n}));\n"
+    end
+  }
+
+  puts "  fprintf(stderr, \"\\n\");"
+  puts "}\n"
+  puts "#endif /*DUMP_LIR > 0*/"
+end
+
+def emit_specialinst(ir)
+  if !ir.variadic and ir.trans
+    print "static lir_t EmitSpecialInst_#{ir.name}(TraceRecorder *Rec"
+    puts ", CALL_INFO ci, lir_t *regs)"
+    puts "{\n"
+    print "  return Emit_#{ir.name}(Rec"
+    puts ir.arg.length.times.map {|i| ", regs[#{i}]" }.join("") + ");"
+    puts "}\n"
+  end
+end
+
+def emit_get_next(ir)
+  puts "static lir_t *GetNext_#{ir.name}(lir_inst_t *Inst, int idx)"
+  puts "{"
+  argc = 0
+  ir.arg.each{|e|
+    if e.type == "LirPtr" || (e.variadic && e.type = "lir_t")
+      argc += 1
+    elsif e.type == "lir_t"
+      argc += 1
+    end
+  }
+  if argc > 0
+    puts "  I#{ir.name} *ir = (I#{ir.name} *)Inst;\n"
+  end
+
+  i = 0
+  puts "  switch(idx) {"
+  ir.arg.each{|e|
+    t = e.type
+    n = e.name
+    if e.type == "LirPtr" || (e.variadic && e.type = "lir_t")
+      puts "  default:"
+      puts "    if (0 < idx - #{i} && idx - #{i} < ir->argc) {"
+      puts "      return &ir->#{n}[idx - #{i}];"
+      puts "    }"
+      i += 1
+    elsif e.type == "lir_t"
+      puts "  case #{i}:"
+      puts "    return &ir->#{n};"
+      i += 1
+    end
+  }
+  puts "  }"
+  puts "  return NULL;"
+  puts "}\n"
+end
+
+irs.each{|ir|
+  define_struct ir
+  emit_ir ir
+  emit_specialinst ir
+  dump_ir ir
+  emit_get_next ir
 }
 
 puts "#define GWIR_EACH(OP) \\"

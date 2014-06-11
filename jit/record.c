@@ -926,7 +926,15 @@ static void record_setinlinecache(TraceRecorder *Rec,
 static void record_once(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                         VALUE *reg_pc)
 {
-    not_support_op(Rec, reg_cfp, reg_pc, "once");
+    IC ic = (IC)GET_OPERAND(2);
+    //ISEQ iseq = (ISEQ)GET_OPERAND(1);
+    union iseq_inline_storage_entry *is = (union iseq_inline_storage_entry *)ic;
+
+    if (is->once.done == Qfalse) {
+        not_support_op(Rec, reg_cfp, reg_pc, "once");
+    } else {
+        _PUSH(EmitLoadConst(Rec, is->once.value));
+    }
 }
 
 static void record_opt_case_dispatch(TraceRecorder *Rec,

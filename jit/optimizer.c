@@ -53,6 +53,23 @@ static int is_terminator(lir_inst_t *inst)
     return 0;
 }
 
+static int is_constant(lir_inst_t *inst)
+{
+    switch (lir_opcode(inst)) {
+    case OPCODE_ILoadConstNil:
+    case OPCODE_ILoadConstObject:
+    case OPCODE_ILoadConstBoolean:
+    case OPCODE_ILoadConstFixnum:
+    case OPCODE_ILoadConstFloat:
+    case OPCODE_ILoadConstString:
+    case OPCODE_ILoadConstRegexp:
+        return 1;
+    default:
+        break;
+    }
+    return 0;
+}
+
 static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst)
 {
     /* Remove guard that always true
@@ -134,7 +151,6 @@ static lir_inst_t *fold_binop_fixnum2(TraceRecorder *Rec, lir_folder_t folder, l
 
 static lir_inst_t *fold_binop_float2(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
-    IFloatAdd *ir = (IFloatAdd *)inst;
     ILoadConstFloat *LHS = (ILoadConstFloat *)*lir_inst_get_args(inst, 0);
     ILoadConstFloat *RHS = (ILoadConstFloat *)*lir_inst_get_args(inst, 1);
     int lop = lir_opcode(&LHS->base);
@@ -152,7 +168,6 @@ static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val);
 
 static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
-    IObjectToString *ir = (IObjectToString *)inst;
     ILoadConstObject *Val = (ILoadConstObject *)*lir_inst_get_args(inst, 0);
     VALUE val = Qundef;
     switch(lir_opcode(&Val->base)) {
@@ -171,10 +186,33 @@ static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir
     return inst;
 }
 
+static lir_inst_t *add_const_pool(TraceRecorder *Rec, lir_inst_t *inst)
+{
+    VALUE val;
+    if (lir_opcode(inst) == OPCODE_ILoadConstNil) {
+        val = Qnil;
+    }
+    else {
+        val = ((ILoadConstObject *)inst)->Val;
+    }
+    Trace *trace = Rec->jit->CurrentTrace;
+    unsigned i;
+    for (i = 0; i < trace->constpool_size; i++) {
+        VALUE obj = trace->constpool[i];
+        if (obj == val) {
+            return Rec->constpool[i];
+        }
+    }
+    return inst;
+}
+
 static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
 {
     if (is_guard(inst) || is_terminator(inst)) {
         return inst;
+    }
+    if (is_constant(inst)) {
+        return add_const_pool(Rec, inst);
     }
     lir_folder_t folder = const_fold_funcs[lir_opcode(inst)];
     if (folder == NULL) {
@@ -182,8 +220,8 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
     }
 
     switch (lir_opcode(inst)) {
-    //case OPCODE_IObjectToString:
-    //    return fold_binop_tostr(Rec, folder, inst);
+    case OPCODE_IObjectToString:
+        return fold_binop_tostr(Rec, folder, inst);
     //case OPCODE_FixnumComplement :
     //case OPCODE_FixnumToFloat :
     //case OPCODE_FixnumToString :
@@ -248,7 +286,6 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
     default :
         break;
     }
-    //}
 return inst;
 }
 

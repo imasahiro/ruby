@@ -95,6 +95,10 @@ static lir_t EmitConverter(TraceRecorder *Rec, VALUE val, lir_t Rval,
 static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
 {
     lir_t Rval = NULL;
+    BasicBlock *BB = Rec->EntryBlock;
+    BasicBlock *prevBB = Rec->Block;
+    Rec->Block = BB;
+    unsigned inst_size = BB->size;
     if (NIL_P(val)) {
         Rval = EmitIR(LoadConstNil);
     } else if (val == Qtrue || val == Qfalse) {
@@ -116,6 +120,11 @@ static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
     if(Rval == NULL) {
         Rval = EmitIR(LoadConstObject, val);
     }
+    if (inst_size != BB->size) {
+        TraceRecorderAddConst(Rec, Rval, val);
+        BasicBlockReplace(Rec->EntryBlock, inst_size-1, inst_size);
+    }
+    Rec->Block = prevBB;
     return Rval;
 }
 
@@ -1040,7 +1049,7 @@ static void record_opt_aset_with(TraceRecorder *Rec,
     val = TOPN(0);
     Rval = _POP();
     Rrecv = _POP();
-    Robj = EmitIR(LoadConstString, key);
+    Robj = EmitLoadConst(Rec, key);
 
     VALUE params[] = { recv, key, val };
     lir_t regs[] = { Rrecv, Robj, Rval };
@@ -1058,7 +1067,7 @@ static void record_opt_aref_with(TraceRecorder *Rec,
     key = (VALUE)GET_OPERAND(2);
     recv = TOPN(0);
     Rrecv = _POP();
-    Robj = EmitIR(LoadConstString, key);
+    Robj = EmitLoadConst(Rec, key);
 
     VALUE params[] = { recv, key };
     lir_t regs[] = { Rrecv, Robj };
@@ -1146,7 +1155,7 @@ static void record_bitblt(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_answer(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                           VALUE *reg_pc)
 {
-    _PUSH(EmitIR(LoadConstFixnum, INT2FIX(42)));
+    _PUSH(EmitLoadConst(Rec, INT2FIX(42)));
 }
 
 static void record_getlocal_OP__WC__0(TraceRecorder *Rec,
@@ -1185,7 +1194,7 @@ static void record_putobject_OP_INT2FIX_O_0_C_(TraceRecorder *Rec,
                                                rb_control_frame_t *reg_cfp,
                                                VALUE *reg_pc)
 {
-    lir_t Rval = EmitIR(LoadConstFixnum, INT2FIX(0));
+    lir_t Rval = EmitLoadConst(Rec, INT2FIX(0));
     _PUSH(Rval);
 }
 
@@ -1193,7 +1202,7 @@ static void record_putobject_OP_INT2FIX_O_1_C_(TraceRecorder *Rec,
                                                rb_control_frame_t *reg_cfp,
                                                VALUE *reg_pc)
 {
-    lir_t Rval = EmitIR(LoadConstFixnum, INT2FIX(1));
+    lir_t Rval = EmitLoadConst(Rec, INT2FIX(1));
     _PUSH(Rval);
 }
 

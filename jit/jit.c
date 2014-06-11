@@ -17,6 +17,7 @@
 #include "vm_insnhelper.h"
 #include "internal.h"
 #include "iseq.h"
+#include "gc.h"
 #include "insns.inc"
 #include "vmrecord.inc"
 
@@ -245,10 +246,65 @@ typedef TraceExitStatus (*native_func_t)(rb_thread_t *th,
 static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace);
 
 struct RJit {
+    VALUE self;
     TraceRecorder *Rec;
     TraceMode mode_;
     Trace *CurrentTrace;
     hashmap_t Traces;
+};
+
+typedef struct inline_cache_manager {
+    CALL_INFO *CallInfoList;
+    int CallInfoListSize;
+    int CallInfoListCapacity;
+    int CallInfoLastFreezed;
+} InlineCacheManager;
+
+struct TraceRecorder {
+    RJit *jit;
+    Event *CurrentEvent;
+
+    BasicBlock *Block;
+    BasicBlock *EntryBlock;
+
+    lir_linkedlist_t *buffer_head;
+    lir_linkedlist_t *buffer_root;
+    char *buffer_current;
+
+    lir_t *RegStack;
+    int RegStackBottom;
+    int RegStackSize;
+    int RegStackCapacity;
+
+    struct call_stack_struct *CallStack;
+    int CallStackSize;
+    int CallStackCapacity;
+
+    int LastInstId;
+    int CallDepth;
+
+    lir_inst_t **constpool;
+    unsigned constpool_size;
+    unsigned constpool_capacity;
+
+    InlineCacheManager CacheMng;
+};
+
+struct Trace {
+    native_func_t Code;
+    void *precondition;
+    VALUE *StartPC;
+    VALUE *LastPC;
+    Trace *Parent;
+    const rb_iseq_t *iseq;
+    unsigned counter;
+    unsigned flag;
+    hashmap_t StackMap;
+    hashmap_t *SideExit;
+    void *handler;
+    VALUE *constpool;
+    unsigned constpool_size;
+    unsigned constpool_capacity;
 };
 
 static void RJitSetMode(RJit *Jit, TraceMode mode)
@@ -262,13 +318,57 @@ static int RJitModeIs(RJit *Jit, TraceMode mode)
     return (Jit->mode_ & mode) == mode;
 }
 
+static void jit_mark(void *ptr)
+{
+    RUBY_MARK_ENTER("jit");
+    if (ptr) {
+        RJit *jit = ptr;
+        hashmap_iterator_t itr = { 0, 0 };
+        while (hashmap_next(&jit->Traces, &itr)) {
+            Trace *trace = (Trace *) itr.entry->val;
+            unsigned i;
+            for (i = 0; i < trace->constpool_size; i++) {
+                VALUE obj = trace->constpool[i];
+                if(obj) {
+                    rb_gc_mark(obj);
+                }
+            }
+        }
+    }
+    RUBY_MARK_LEAVE("jit");
+}
+
+static size_t jit_memsize(const void *ptr)
+{
+    if (ptr) {
+        RJit *jit = (RJit *) ptr;
+        size_t size = sizeof(RJit) + sizeof(TraceRecorder);
+        size += sizeof(hashmap_t) * hashmap_size(&jit->Traces);
+        return size;
+    }
+    return 0;
+}
+
+static const rb_data_type_t jit_data_type = {
+    "JIT",
+    {jit_mark, NULL, jit_memsize,},
+    NULL, NULL, RUBY_TYPED_FREE_IMMEDIATELY
+};
+
 static RJit *RJitInit()
 {
     RJit *Jit = (RJit *)malloc(sizeof(*Jit));
+    VALUE rb_cJit = rb_define_class("Jit", rb_cObject);
+    rb_undef_alloc_func(rb_cJit);
+    rb_undef_method(CLASS_OF(rb_cJit), "new");
+
     Jit->Rec = TraceRecorderNew(Jit);
     RJitSetMode(Jit, TRACE_MODE_DEFAULT);
     Jit->CurrentTrace = NULL;
     hashmap_init(&Jit->Traces, 4);
+
+    Jit->self = TypedData_Wrap_Struct(rb_cJit, &jit_data_type, Jit);
+    rb_gc_register_mark_object(Jit->self);
     return Jit;
 }
 
@@ -318,20 +418,6 @@ static StackMap *GetStackMap(TraceRecorder *Rec, VALUE *pc);
 static void DeleteStackMap(StackMap *map) { free((void *)map); }
 
 // trace
-struct Trace {
-    native_func_t Code;
-    void *precondition;
-    VALUE *StartPC;
-    VALUE *LastPC;
-    Trace *Parent;
-    const rb_iseq_t *iseq;
-    unsigned counter;
-    unsigned flag;
-    hashmap_t StackMap;
-    hashmap_t *SideExit;
-    void *handler;
-};
-
 static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
 {
     Trace *trace = (Trace *)malloc(sizeof(*trace));
@@ -344,7 +430,20 @@ static Trace *TraceNew(const rb_iseq_t *iseq, VALUE *pc, Trace *parent)
     hashmap_init(&trace->StackMap, 1);
     trace->SideExit = NULL;
     trace->handler = NULL;
+    trace->constpool = NULL;
+    trace->constpool_size = trace->constpool_capacity = 0;
     return trace;
+}
+
+static void TraceAddConst(Trace *trace, VALUE val)
+{
+    if (trace->constpool_size == trace->constpool_capacity) {
+        trace->constpool_capacity *= 2;
+        trace->constpool = realloc(trace->constpool,
+                sizeof(VALUE) * trace->constpool_capacity);
+    }
+    trace->constpool[trace->constpool_size] = val;
+    trace->constpool_size += 1;
 }
 
 static void TraceDropHandler(Trace *trace);
@@ -362,6 +461,17 @@ static void TraceClear(Trace *trace, int alloc)
     if (trace->handler) {
         TraceDropHandler(trace);
         trace->handler = NULL;
+    }
+
+    if (trace->constpool) {
+        trace->constpool_size = 0;
+        trace->constpool_capacity = 0;
+        free(trace->constpool);
+    }
+    if (alloc) {
+        trace->constpool = (VALUE *) malloc(sizeof(VALUE));
+        trace->constpool[0] = 0;
+        trace->constpool_capacity = 1;
     }
 }
 
@@ -434,14 +544,7 @@ static int isBackwardBranch(Event *e)
     return 0;
 }
 
-// List of entry of inline cache that jit generated code use
-typedef struct inline_cache_manager {
-    CALL_INFO *CallInfoList;
-    int CallInfoListSize;
-    int CallInfoListCapacity;
-    int CallInfoLastFreezed;
-} InlineCacheManager;
-
+// InlineCacheManager
 static CALL_INFO CloneInlineCache(InlineCacheManager *icm, CALL_INFO ci)
 {
     CALL_INFO newci = (CALL_INFO)malloc(sizeof(*newci));
@@ -484,33 +587,7 @@ static void InlineCacheManagerDelete(InlineCacheManager *icm)
     CancelCallInfo(icm);
 }
 
-// trace recorder
-struct TraceRecorder {
-    RJit *jit;
-    Event *CurrentEvent;
-
-    BasicBlock *Block;
-    BasicBlock *EntryBlock;
-
-    lir_linkedlist_t *buffer_head;
-    lir_linkedlist_t *buffer_root;
-    char *buffer_current;
-
-    lir_t *RegStack;
-    int RegStackBottom;
-    int RegStackSize;
-    int RegStackCapacity;
-
-    struct call_stack_struct *CallStack;
-    int CallStackSize;
-    int CallStackCapacity;
-
-    int LastInstId;
-    int CallDepth;
-
-    InlineCacheManager CacheMng;
-};
-
+// TraceRecorder
 static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer);
 
 static TraceRecorder *TraceRecorderNew(RJit *jit)
@@ -571,6 +648,22 @@ static Trace *TraceRecorderGetTrace(TraceRecorder *Rec)
     return Rec->jit->CurrentTrace;
 }
 
+static void TraceRecorderAddConst(TraceRecorder *Rec, lir_inst_t *inst, VALUE val)
+{
+    assert(Rec->jit->CurrentTrace->constpool_size == Rec->constpool_size);
+
+    TraceAddConst(Rec->jit->CurrentTrace, val);
+    if (Rec->constpool_size == Rec->constpool_capacity) {
+        unsigned newsize = Rec->constpool_capacity * 2;
+        Rec->constpool = (lir_inst_t **) lir_realloc(Rec, Rec->constpool,
+                sizeof(lir_inst_t*) * Rec->constpool_capacity,
+                sizeof(lir_inst_t*) * newsize);
+        Rec->constpool_capacity = newsize;
+    }
+    Rec->constpool[Rec->constpool_size] = inst;
+    Rec->constpool_size += 1;
+}
+
 static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
 {
     lir_linkedlist_t *storage = Rec->buffer_head;
@@ -613,6 +706,16 @@ static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
         Rec->CallStackCapacity = 1;
         Rec->CallStack = (struct call_stack_struct *)lir_alloc(
             Rec, sizeof(struct call_stack_struct) * 1);
+    }
+
+    if (Rec->constpool) {
+        Rec->constpool_size = 0;
+        Rec->constpool_capacity = 0;
+    }
+    if (AllocBuffer) {
+        Rec->constpool = (lir_inst_t **) lir_alloc(Rec, sizeof(lir_inst_t *));
+        Rec->constpool[0] = 0;
+        Rec->constpool_capacity = 1;
     }
 
     Rec->CallDepth = 0;

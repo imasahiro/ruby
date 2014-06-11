@@ -53,11 +53,21 @@ static void TakeStackSnapshot(TraceRecorder *Rec, VALUE *PC)
     for (i = begin, j = 0; i < end; i++) {
         lir_t reg = Rec->RegStack[i];
 #if DUMP_STACK_MAP > 0
-        fprintf(stderr, "\t\t[%d] reg=%ld\n", i, reg);
+        fprintf(stderr, "\t\t[%d] reg=%p\n", i, reg);
 #endif
         map->regs[j++] = reg;
     }
     AddStackMap(Rec, PC, map);
+}
+
+static void BasicBlockReplace(BasicBlock *bb, int idx1, int idx2)
+{
+    lir_inst_t **Insts = bb->Insts;
+    lir_inst_t *inst1, *inst2;
+    inst1 = Insts[idx1];
+    inst2 = Insts[idx2];
+    Insts[idx2] = inst1;
+    Insts[idx1] = inst2;
 }
 
 static lir_t AdjustStack(TraceRecorder *Rec)
@@ -75,17 +85,11 @@ static lir_t AdjustStack(TraceRecorder *Rec)
      * L1: StackPop(1) | StackPop(1)
      * L2: StackPop(0) | StackPop(0)
      * L3: Jump Block  | StackPop(2)
-     * L4: StackPop(1) | Jump Block
+     * L4: StackPop(2) | Jump Block
      */
     int jumpIdx = Rec->EntryBlock->size - 1;
-    lir_inst_t **Insts = Rec->EntryBlock->Insts;
-    lir_inst_t *last, *jump;
-    jump = Insts[jumpIdx - 1];
-    last = Insts[jumpIdx];
-    Insts[jumpIdx - 1] = last;
-    Insts[jumpIdx] = jump;
+    BasicBlockReplace(Rec->EntryBlock, jumpIdx - 1, jumpIdx);
     Rec->Block = PrevBB;
-    assert(Rec->EntryBlock);
 #if 0
   /*
    *      before     |   after

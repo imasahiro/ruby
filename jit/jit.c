@@ -55,7 +55,7 @@ typedef struct lir_inst_t      lir_inst_t;
 
 typedef struct lir_list_t {
     lir_compile_data_header_t base;
-    lir_inst_t *list;
+    lir_inst_t **list;
     unsigned size;
     unsigned capacity;
 } lir_list_t;
@@ -63,7 +63,6 @@ typedef struct lir_list_t {
 struct lir_inst_t {
     lir_compile_data_header_t base;
     BasicBlock *parent;
-    lir_list_t *args;
     lir_list_t *user;
 };
 

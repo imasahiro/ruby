@@ -120,9 +120,8 @@ static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst)
 
 static lir_inst_t *fold_binop_fixnum2(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
-    IFixnumAdd *ir = (IFixnumAdd *) inst;
-    ILoadConstFixnum *LHS = (ILoadConstFixnum *) ir->LHS;
-    ILoadConstFixnum *RHS = (ILoadConstFixnum *) ir->RHS;
+    ILoadConstFixnum *LHS = (ILoadConstFixnum *)*lir_inst_get_args(inst, 0);
+    ILoadConstFixnum *RHS = (ILoadConstFixnum *)*lir_inst_get_args(inst, 1);
     int lop = lir_opcode(&LHS->base);
     int rop = lir_opcode(&RHS->base);
     // const + const
@@ -136,8 +135,8 @@ static lir_inst_t *fold_binop_fixnum2(TraceRecorder *Rec, lir_folder_t folder, l
 static lir_inst_t *fold_binop_float2(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
     IFloatAdd *ir = (IFloatAdd *)inst;
-    ILoadConstFloat *LHS = (ILoadConstFloat *) ir->LHS;
-    ILoadConstFloat *RHS = (ILoadConstFloat *) ir->RHS;
+    ILoadConstFloat *LHS = (ILoadConstFloat *)*lir_inst_get_args(inst, 0);
+    ILoadConstFloat *RHS = (ILoadConstFloat *)*lir_inst_get_args(inst, 1);
     int lop = lir_opcode(&LHS->base);
     int rop = lir_opcode(&RHS->base);
     // const + const
@@ -154,7 +153,7 @@ static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val);
 static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
     IObjectToString *ir = (IObjectToString *)inst;
-    ILoadConstObject *Val = (ILoadConstObject *) ir->Val;
+    ILoadConstObject *Val = (ILoadConstObject *)*lir_inst_get_args(inst, 0);
     VALUE val = Qundef;
     switch(lir_opcode(&Val->base)) {
     case OPCODE_ILoadConstNil:

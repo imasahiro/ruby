@@ -106,9 +106,39 @@ static void *lir_inst_init(void *ptr, unsigned opcode)
     inst->base.flag = 0;
     inst->base.opcode = opcode;
     inst->parent = NULL;
-    inst->args = NULL;
     inst->user = NULL;
     return inst;
+}
+
+static lir_list_t *lir_list_init(TraceRecorder *Rec)
+{
+    lir_list_t *list = (lir_list_t *)lir_alloc(Rec, sizeof(*list));
+    list->list = (lir_inst_t **)lir_alloc(Rec, sizeof(lir_inst_t *) * 1);
+    list->size = 0;
+    list->capacity = 1;
+    return list;
+}
+
+static void lir_list_add(TraceRecorder *Rec, lir_list_t *list, lir_inst_t *ir)
+{
+    if (list->size == list->capacity) {
+        unsigned newsize = list->capacity * 2;
+        list->list = (lir_inst_t **)lir_realloc(
+            Rec, list->list,
+            sizeof(lir_inst_t *) * list->capacity,
+            sizeof(lir_inst_t *) * newsize);
+        list->capacity = newsize;
+    }
+    list->list[list->size] = ir;
+    list->size += 1;
+}
+
+static void lir_inst_adduser(TraceRecorder *Rec, lir_inst_t *inst, lir_inst_t *ir)
+{
+    if (inst->user) {
+        inst->user = lir_list_init(Rec);
+    }
+    lir_list_add(Rec, inst->user, ir);
 }
 
 static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size);
@@ -133,6 +163,21 @@ static int peephole(TraceRecorder *Rec, lir_inst_t *inst)
         return -1;
     }
     return 0;
+}
+
+static lir_inst_t **lir_inst_get_args(lir_inst_t *inst, int idx)
+{
+#define GET_ARG(OPNAME)    \
+    case OPCODE_I##OPNAME: \
+        return GetNext_##OPNAME(inst, idx);
+
+    switch (lir_opcode(inst)) {
+        GWIR_EACH(GET_ARG);
+    default:
+        assert(0 && "unreachable");
+    }
+#undef GET_ARG
+    return NULL;
 }
 
 static int lir_inst_define_value(int opcode)

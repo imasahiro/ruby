@@ -52,6 +52,7 @@ static void gwjit_context_init()
     jit_host_context._rb_big_mul = rb_big_mul;
     jit_host_context._rb_int2big = rb_int2big;
     jit_host_context._rb_str_length = rb_str_length;
+    jit_host_context._rb_str_plus = rb_str_plus;
     jit_host_context._rb_str_resurrect = rb_str_resurrect;
     jit_host_context._rb_range_new = rb_range_new;
     jit_host_context._rb_hash_new = rb_hash_new;

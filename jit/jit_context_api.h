@@ -31,6 +31,7 @@
 #define rb_big_minus (jit_context->_rb_big_minus)
 #define rb_big_mul (jit_context->_rb_big_mul)
 #define rb_int2big (jit_context->_rb_int2big)
+#define rb_str_plus (jit_context->_rb_str_plus)
 #define rb_str_length (jit_context->_rb_str_length)
 #define rb_str_resurrect (jit_context->_rb_str_resurrect)
 #define rb_range_new (jit_context->_rb_range_new)

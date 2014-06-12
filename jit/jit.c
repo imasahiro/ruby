@@ -748,7 +748,7 @@ static void TraceRecorderAppend(RJit *jit, TraceRecorder *Rec, Event *e)
 
 static int TraceRecorderIsFull(TraceRecorder *Rec)
 {
-    return Rec->LastInstId == GWIR_MAX_TRACE_LENGTH;
+    return Rec->LastInstId >= GWIR_MAX_TRACE_LENGTH;
 }
 
 static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)

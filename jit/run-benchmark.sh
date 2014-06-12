@@ -66,11 +66,11 @@ mkdir -p benchmark-tmp
 for i in $LIST; do
     cp $i benchmark-tmp/
 done
-ruby ./benchmark/driver.rb \
-            --executables="ruby; built-ruby::build/miniruby" \
-            --pattern='bm_' --directory=./benchmark-tmp
-rm -rf benchmark-tmp
-
 #ruby ./benchmark/driver.rb \
-#            --executables="ruby; built-ruby::build/ruby" \
-#            --pattern='bm_' --directory=./benchmark
+#            --executables="ruby; built-ruby::build/miniruby" \
+#            --pattern='bm_' --directory=./benchmark-tmp
+#rm -rf benchmark-tmp
+
+ruby ./benchmark/driver.rb \
+            --executables="ruby; rujit::build/ruby" \
+            --pattern='bm_(app|so|vm*)' --directory=./benchmark

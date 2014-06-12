@@ -521,6 +521,7 @@ static int get_opcode(rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
     long pc = GET_PC_COUNT();
     int op = (int)(GET_ISEQ()->iseq[pc]);
+    assert(0 <= op && op < VM_INSTRUCTION_SIZE);
     return op;
 }
 
@@ -708,10 +709,9 @@ static void TraceRecorderClear(TraceRecorder *Rec, int AllocBuffer)
             Rec, sizeof(struct call_stack_struct) * 1);
     }
 
-    if (Rec->constpool) {
-        Rec->constpool_size = 0;
-        Rec->constpool_capacity = 0;
-    }
+    Rec->constpool_size = 0;
+    Rec->constpool_capacity = 0;
+    Rec->constpool = NULL;
     if (AllocBuffer) {
         Rec->constpool = (lir_inst_t **) lir_alloc(Rec, sizeof(lir_inst_t *));
         Rec->constpool[0] = 0;
@@ -795,6 +795,7 @@ static VALUE *Invoke(RJit *jit, rb_thread_t *th, Trace *trace, Event *e)
     switch (exit_status) {
     case TRACE_EXIT_SIDE_EXIT:
         trace = GetOrAddTrace(jit, th->cfp, exit_pc, trace);
+        TraceClear(trace, 1);
         TraceRecorderClear(jit->Rec, 1);
         RJitSetTrace(jit, TRACE_MODE_RECORD, trace);
         break;

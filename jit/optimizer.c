@@ -227,9 +227,13 @@ static lir_inst_t *add_const_pool(TraceRecorder *Rec, lir_inst_t *inst)
     }
     Trace *trace = Rec->jit->CurrentTrace;
     unsigned i;
+    assert(Rec->jit->CurrentTrace->constpool_size == Rec->constpool_size);
     for (i = 0; i < trace->constpool_size; i++) {
         VALUE obj = trace->constpool[i];
         if (obj == val) {
+            if (Rec->constpool[i] == NULL) {
+                asm volatile("int3");
+            }
             return Rec->constpool[i];
         }
     }
@@ -318,7 +322,7 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
     default :
         break;
     }
-return inst;
+    return inst;
 }
 
 typedef struct worklist_t {

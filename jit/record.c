@@ -562,10 +562,9 @@ static void record_toregexp(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     lir_t regs[cnt];
     lir_t Rary;
     for (i = 0; i < cnt; i++) {
-        regs[cnt - i] = _POP();
+        regs[cnt - i - 1] = _POP();
     }
     Rary = EmitIR(AllocArray, (int)cnt, regs);
-    assert(0 && "need to test");
     _PUSH(EmitIR(AllocRegexFromArray, Rary, (int)opt));
 }
 

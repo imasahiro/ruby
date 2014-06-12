@@ -47,6 +47,7 @@ typedef struct gwjit_context {
     VALUE (*_rb_hash_aref)(VALUE, VALUE);
     VALUE (*_rb_hash_aset)(VALUE, VALUE, VALUE);
     VALUE (*_rb_reg_match)(VALUE, VALUE);
+    VALUE (*_rb_reg_new_ary)(VALUE, int);
     VALUE (*_rb_ary_new)();
     VALUE (*_rb_ary_new_from_values)(long n, const VALUE *elts);
     VALUE (*_rb_gvar_get)(struct rb_global_entry *);

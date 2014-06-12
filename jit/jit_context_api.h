@@ -40,6 +40,7 @@
 #define rb_hash_aref (jit_context->_rb_hash_aref)
 #define rb_hash_aset (jit_context->_rb_hash_aset)
 #define rb_reg_match (jit_context->_rb_reg_match)
+#define rb_reg_new_ary (jit_context->_rb_reg_new_ary)
 #define rb_ary_new (jit_context->_rb_ary_new)
 #define rb_ary_new_from_values (jit_context->_rb_ary_new_from_values)
 #define rb_gvar_get (jit_context->_rb_gvar_get)

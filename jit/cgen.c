@@ -28,6 +28,9 @@
 
 static gwjit_context_t jit_host_context = {};
 
+/* from re.c */
+VALUE rb_reg_new_ary(VALUE ary, int opt);
+
 static void gwjit_context_init()
 {
     unsigned long i;
@@ -60,6 +63,7 @@ static void gwjit_context_init()
     jit_host_context._rb_hash_aref = rb_hash_aref;
     jit_host_context._rb_hash_aset = rb_hash_aset;
     jit_host_context._rb_reg_match = rb_reg_match;
+    jit_host_context._rb_reg_new_ary = rb_reg_new_ary;
     jit_host_context._rb_ary_new = rb_ary_new;
     jit_host_context._rb_ary_new_from_values = rb_ary_new_from_values;
     jit_host_context._rb_class_new_instance = rb_class_new_instance;
@@ -1208,8 +1212,9 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         break;
     }
     case OPCODE_IAllocRegexFromArray: {
-        // IAllocRegexFromArray *ir = (IAllocRegexFromArray *) Inst;
-        assert(0 && "not implemented");
+        IAllocRegexFromArray *ir = (IAllocRegexFromArray *) Inst;
+        cgen_printf(gen, "  v%ld = rb_reg_new_ary(v%ld, %d);\n",
+                Id, lir_getid(ir->Ary), ir->opt);
         break;
     }
 

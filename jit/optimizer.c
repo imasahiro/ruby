@@ -118,19 +118,24 @@ static int elimnate_guard(TraceRecorder *Rec, lir_inst_t *inst)
         }
     }
 
-    //if (lir_opcode(inst) == OPCODE_IGuardTypeSpecialConst) {
-    //    switch (lir_opcode(src)) {
-    //    case OPCODE_ILoadConstNil     :
-    //    case OPCODE_ILoadConstBoolean :
-    //    case OPCODE_ILoadConstFixnum  :
-    //    case OPCODE_ILoadConstFloat   :
-    //    case OPCODE_IGuardTypeNil     :
-    //    case OPCODE_IGuardTypeNonNil  :
-    //        return 1;
-    //    default:
-    //        break;
-    //    }
-    //}
+    if (lir_opcode(inst) == OPCODE_IGuardTypeSpecialConst) {
+        switch (lir_opcode(src)) {
+        case OPCODE_ILoadConstNil:
+        case OPCODE_ILoadConstBoolean:
+        case OPCODE_ILoadConstFixnum:
+            return 0;
+        case OPCODE_ILoadConstFloat:
+            if (!FLONUM_P(((ILoadConstFloat *)src)->Val)) {
+                return 1;
+            }
+        case OPCODE_ILoadConstObject:
+        case OPCODE_ILoadConstString:
+        case OPCODE_ILoadConstRegexp:
+            return 1;
+        default:
+            break;
+        }
+    }
 
     return 0;
 }
@@ -188,9 +193,10 @@ static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir
 
 static lir_inst_t *fold_string_add(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
-#if 0
+#if 1
     lir_inst_t *LHS = *lir_inst_get_args(inst, 0);
     lir_inst_t *RHS = *lir_inst_get_args(inst, 1);
+    assert(folder == rb_jit_exec_IStringAdd);
     // (StringAdd (AllocStr LoadConstString1) LoadConstString2)
     // => (AllocStr LoadConstString3)
     if (lir_opcode(LHS) == OPCODE_IAllocString) {
@@ -199,9 +205,8 @@ static lir_inst_t *fold_string_add(TraceRecorder *Rec, lir_folder_t folder, lir_
             ILoadConstString *lstr = (ILoadConstString *) left->OrigStr;
             if (lir_opcode(RHS) == OPCODE_ILoadConstString) {
                 ILoadConstString *rstr = (ILoadConstString *) RHS;
-                VALUE val = ((lir_folder2_t)folder)(lstr->Val, rstr->Val);
+                VALUE val = rb_str_plus(lstr->Val, rstr->Val);
                 lir_inst_t *tmp = EmitLoadConst(Rec, val);
-                asm volatile("int3");
                 return Emit_AllocString(Rec, tmp);
             }
         }
@@ -316,76 +321,162 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
 return inst;
 }
 
-//static int constant_fold(worklist_t *list, TraceRecorder *builder, lir_inst_t *ir)
-//{
-//    lir_inst_t *newinst = constant_fold_inst(builder, inst);
-//    if (inst != newinst) {
-//        for (i = 0; i < use->size; i++) {
-//            worklist_push(worklist, );
-//        }
-//        inst_replace_with(inst, newinst);
-//    }
-//}
+typedef struct worklist_t {
+    lir_list_t list;
+    TraceRecorder *Rec;
+} worklist_t;
+
+typedef int (*worklist_func_t)(worklist_t *, lir_inst_t *);
+
+static void worklist_push(worklist_t *list, lir_inst_t *ir)
+{
+    lir_list_add(list->Rec, &list->list, ir);
+}
+
+static lir_inst_t *worklist_pop(worklist_t *list)
+{
+    lir_inst_t *last;
+    assert(list->list.size > 0);
+    last = list->list.list[list->list.size - 1];
+    list->list.size -= 1;
+    return last;
+}
+
+static int worklist_empty(worklist_t *list)
+{
+    return list->list.size == 0;
+}
+
+static void worklist_init(worklist_t *list, BasicBlock *block, TraceRecorder *Rec)
+{
+    lir_list_init(Rec, &list->list);
+    list->Rec = Rec;
+    unsigned i;
+    while (block != NULL) {
+        for (i = 0; i < block->size; i++) {
+            lir_inst_t *Inst = block->Insts[i];
+            worklist_push(list, Inst);
+        }
+        block = (BasicBlock *)block->base.next;
+    }
+}
+
+static int apply_worklist(TraceRecorder *Rec, BasicBlock *block, worklist_func_t func)
+{
+    worklist_t worklist;
+    worklist_init(&worklist, block, Rec);
+    int modified = 0;
+    while (!worklist_empty(&worklist)) {
+        lir_inst_t *inst = worklist_pop(&worklist);
+        modified += func(&worklist, inst);
+    }
+    return modified;
+}
+
+static int constant_fold(worklist_t *list, lir_inst_t *inst)
+{
+    lir_inst_t *newinst;
+    TraceRecorder *Rec = list->Rec;
+    BasicBlock *prevBB = Rec->Block;
+    Rec->Block = inst->parent;
+    newinst = constant_fold_inst(Rec, inst);
+    Rec->Block = prevBB;
+    if (inst != newinst) {
+        if (inst->user) {
+            unsigned i;
+            for (i = 0; i < inst->user->size; i++) {
+                worklist_push(list, inst->user->list[i]);
+            }
+        }
+        lir_inst_replace_with(Rec, inst, newinst);
+        return 1;
+    }
+    return 0;
+}
+
+static int has_side_effect(lir_inst_t *inst)
+{
+    return lir_inst_have_side_effect(lir_opcode(inst));
+}
+
+static int need_by_side_exit(TraceRecorder *Rec, lir_inst_t *inst)
+{
+    hashmap_iterator_t itr = { 0, 0 };
+    int i;
+    while (hashmap_next(&TraceRecorderGetTrace(Rec)->StackMap, &itr)) {
+        StackMap *stack = (StackMap *)itr.entry->val;
+        for (i = 0; i < stack->size; i++) {
+            if (inst == stack->regs[i]) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int inst_is_dead(TraceRecorder *Rec, lir_inst_t *inst)
+{
+    if (inst->user && inst->user->size > 0) {
+        return 0;
+    }
+    if (is_terminator(inst)) {
+        return 0;
+    }
+    if (is_guard(inst)) {
+        return 0;
+    }
+    if (has_side_effect(inst)) {
+        return 0;
+    }
+    if (need_by_side_exit(Rec, inst)) {
+        return 0;
+    }
+    return 1;
+}
+
+static void remove_from_parent(lir_inst_t *inst)
+{
+    BasicBlock *bb = inst->parent;
+    unsigned i;
+    for (i = 0; i < bb->size; i++) {
+        if (bb->Insts[i] == inst) {
+            break;
+        }
+    }
+    assert(i != bb->size);
+    bb->size -= 1;
+    memmove(bb->Insts + i, bb->Insts + i + 1, sizeof(lir_inst_t *) * (bb->size - i));
+}
+
+static int eliminate_dead_code(worklist_t *list, lir_inst_t *inst)
+{
+    int i = 0;
+    int is_dead = inst_is_dead(list->Rec, inst);
+    lir_inst_t **ref = NULL;
+    if (!is_dead) {
+        return 0;
+    }
+    while ((ref = lir_inst_get_args(inst, i)) != NULL) {
+        if (*ref) {
+            lir_inst_removeuser(*ref, inst);
+            worklist_push(list, *ref);
+        }
+        i += 1;
+    }
+
+    remove_from_parent(inst);
+    if (0) {
+#if DUMP_LIR > 0
+        dump_lir_inst(inst);
+#endif
+    }
+    return 1;
+}
 
 static void trace_optimize(TraceRecorder *Rec, Trace *trace)
 {
-    //BasicBlock *entry_block = Rec->EntryBlock;
-    //compute_usedef(builder, entry_block);
-    //apply_worklist(builder, entry_block, constant_fold);
-    //loop_invariant_code_motion(builder, entry_block);
-    //apply_worklist(builder, entry_block, eliminate_dead_code);
+    BasicBlock *entry_block = Rec->EntryBlock;
+    apply_worklist(Rec, entry_block, constant_fold);
+    //loop_invariant_code_motion(Rec, entry_block);
+    apply_worklist(Rec, entry_block, eliminate_dead_code);
 }
-
-//typedef struct lir_inst_t {
-//    lir_compile_data_header_t base;
-//    BasicBlock *parent;
-//    lir_list_t *use;
-//    lir_list_t *user;
-//};
-//
-//typedef int (*worklist_func_t)(worklist_t *, TraceRecorder *, lir_inst_t *);
-//
-//static int apply_worklist(TraceRecorder *builder, BasicBlock *entry_block, worklist_func_t func)
-//{
-//    worklist_t worklist;
-//    worklist_init(&worklist, entry_block);
-//    int eliminated = 0;
-//    while (!worklist_empty(worklist)) {
-//        inst = worklist_pop(worklist);
-//        if (inst->use && inst->use->size > 0) {
-//            eliminated += func(worklist, builder, inst);
-//        }
-//    }
-//    return eliminated;
-//}
-//
-//static int inst_is_dead(lir_inst_t *inst)
-//{
-//    if (inst->use && inst->use->size > 0) {
-//        return 0;
-//    }
-//    if (is_terminator(inst)) {
-//        return 0;
-//    }
-//    if (is_guard(inst)) {
-//        return 0;
-//    }
-//    if (!has_sideeffect(inst)) {
-//        return 1;
-//    }
-//    return 0;
-//}
-//
-//static int eliminate_dead_code(worklist_t *list, TraceRecorder *builder, lir_inst_t *ir)
-//{
-//    int i;
-//    int is_dead = inst_is_dead(inst);
-//    if (!is_dead) {
-//        return 0;
-//    }
-//    for (i = 0; i < inst->use->size; i++) {
-//        worklist_push(worklist, inst->use->entry[i]);
-//    }
-//    remove_from_parent(ir);
-//    return 1;
-//}

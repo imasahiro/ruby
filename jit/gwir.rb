@@ -14,8 +14,8 @@ class IRArgument
 end
 
 class OP
-  attr_accessor :name, :def, :use, :arg, :variadic, :trans, :opcode
-  def initialize(name, has_def, has_use, trans, arg, opcode)
+  attr_accessor :name, :def, :use, :arg, :variadic, :trans, :opcode, :side_effect
+  def initialize(name, has_def, has_use, trans, side_effect, arg, opcode)
     @name = name
     @def = has_def == ":def"
     @use = has_use == ":use"
@@ -23,6 +23,7 @@ class OP
     @arg = []
     @variadic = false
     @opcode = opcode
+    @side_effect = side_effect
     parse_arg(arg)
   end
 
@@ -48,13 +49,8 @@ open(ARGV[0]) { |file|
 
   while l = file.gets
     if /^([a-zA-Z0-9_]+)/ =~ l
-      /^([a-zA-Z0-9_]+) *(:def)? *(:use)? *(:trans)? *\((.*)\)$/ =~ l
-      has_def = $2
-      has_use = $3
-      trans   = $4
-      arg  = $5
-
-      ir = OP.new($1, $2, $3, $4, $5, i)
+      /^([a-zA-Z0-9_]+) *(:def)? *(:use)? *(:trans)? *(:effect)? *\((.*)\)$/ =~ l
+      ir = OP.new($1, $2, $3, $4, $5, $6, i)
       irs.push(ir)
       i += 1
     end
@@ -65,6 +61,7 @@ def define_struct(ir)
   puts "#define OPCODE_I#{ir.name} #{ir.opcode}\n"
   puts "#define GWIR_USE_#{ir.name} #{ir.def ? 1 : 0}"
   puts "#define GWIR_DEF_#{ir.name} #{ir.use ? 1 : 0}"
+  puts "#define GWIR_SIDE_EFFECT_#{ir.name} #{ir.side_effect ? 1 : 0}"
   puts "typedef struct I#{ir.name} {\n"
   puts "  lir_inst_t base;"
   ir.arg.each{|e|
@@ -180,7 +177,7 @@ def emit_get_next(ir)
     n = e.name
     if e.type == "LirPtr" || (e.variadic && e.type = "lir_t")
       puts "  default:"
-      puts "    if (0 < idx - #{i} && idx - #{i} < ir->argc) {"
+      puts "    if (0 <= idx - #{i} && idx - #{i} < ir->argc) {"
       puts "      return &ir->#{n}[idx - #{i}];"
       puts "    }"
       i += 1

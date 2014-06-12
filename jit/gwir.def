@@ -77,20 +77,20 @@ MathLog2  :def :use :trans (Recv:lir_t)
 StringLength :def :use :trans (Recv:lir_t)
 StringEmptyP :def :use :trans (Recv:lir_t)
 StringConcat :def :use :trans (LHS:lir_t, RHS:lir_t)
-StringAdd    :def :use :trans (Recv:lir_t, Obj:lir_t)
+StringAdd    :def :use        (Recv:lir_t, Obj:lir_t)
 
 # array operator
 ArrayLength :def :use :trans (Recv:lir_t)
 ArrayEmptyP :def :use :trans (Recv:lir_t)
 ArrayConcat :def :use :trans (LHS:lir_t, RHS:lir_t)
 ArrayGet    :def :use :trans (Recv:lir_t, Index:lir_t)
-ArraySet    :def :use :trans (Recv:lir_t, Index:lir_t, Val:lir_t)
+ArraySet    :def :use :trans :effect (Recv:lir_t, Index:lir_t, Val:lir_t)
 
 # hash operator
 HashLength :def :use :trans (Recv:lir_t)
 HashEmptyP :def :use :trans (Recv:lir_t)
 HashGet    :def :use :trans (Recv:lir_t, Index:lir_t)
-HashSet    :def :use :trans (Recv:lir_t, Index:lir_t, Val:lir_t)
+HashSet    :def :use :trans :effect (Recv:lir_t, Index:lir_t, Val:lir_t)
 
 # regexp operator
 RegExpMatch :def :use :trans (Str:lir_t, Re:lir_t)
@@ -105,11 +105,11 @@ AllocRegexFromArray :def :use (Ary:lir_t, opt:int)
 
 # load/store global variable
 GetGlobal :def :use (Entry:lir_t)
-SetGlobal      :use (Entry:lir_t, Val:lir_t)
+SetGlobal :use :effect (Entry:lir_t, Val:lir_t)
 
 # load/store instance variable
 GetPropertyName :def :use (Recv:lir_t, Index:long)
-SetPropertyName :def :use (Recv:lir_t, Index:long, Val:lir_t)
+SetPropertyName :def :use :effect (Recv:lir_t, Index:long, Val:lir_t)
 
 # constant object instruction
 LoadConstNil     :def ()
@@ -126,17 +126,17 @@ LoadSelfAsBlock :def (iseq:ISEQ)
 LoadBlock       :def (iseq:ISEQ)
 
 # env load/store instruction
-EnvStore :use (Level:int, Index:int, Val:lir_t)
+EnvStore :use :effect (Level:int, Index:int, Val:lir_t)
 EnvLoad  :def (Level:int, Index:int)
 
 # stack instruction
-StackPop    :def ()
-StackAdjust :use (argc:int, argv:LirPtr)
+StackPop    :def :effect ()
+StackAdjust :use :effect (argc:int, argv:LirPtr)
 
 # invoke instruction
-InvokeMethod :def :use (ci:CALL_INFO, argc:int, argv:lir_t[])
-InvokeBlock  :def :use (ci:CALL_INFO, argc:int, argv:lir_t[])
-InvokeNative :def :use (fptr:voidPtr, argc:int, argv:lir_t[])
+InvokeMethod :def :use :effect (ci:CALL_INFO, argc:int, argv:lir_t[])
+InvokeBlock  :def :use :effect (ci:CALL_INFO, argc:int, argv:lir_t[])
+InvokeNative :def :use :effect (fptr:voidPtr, argc:int, argv:lir_t[])
 
 # pattern match instruction
 PatternMatch      :def :use (Pattern:lir_t, Target:lir_t, flag:rb_event_flag_t)
@@ -149,11 +149,11 @@ JumpIf      :use (TargetBB:BasicBlockPtr, Cond:lir_t)
 Throw  :def :use (Reg:lir_t)
 
 # function frame
-FramePush :use (ci:CALL_INFO, invokeblock:int, block:lir_t, argc:int, argv:lir_t[])
-FramePop       ()
+FramePush :use :effect (ci:CALL_INFO, invokeblock:int, block:lir_t, argc:int, argv:lir_t[])
+FramePop  :effect ()
 
 # # phi
 # Phi :def :use ()
 
 # trace
-Trace :use (flag:rb_event_flag_t)
+Trace :use :effect (flag:rb_event_flag_t)

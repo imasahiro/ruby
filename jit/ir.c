@@ -110,17 +110,28 @@ static void *lir_inst_init(void *ptr, unsigned opcode)
     return inst;
 }
 
-static lir_list_t *lir_list_init(TraceRecorder *Rec)
+static lir_list_t *lir_list_init(TraceRecorder *Rec, lir_list_t *list)
 {
-    lir_list_t *list = (lir_list_t *)lir_alloc(Rec, sizeof(*list));
     list->list = (lir_inst_t **)lir_alloc(Rec, sizeof(lir_inst_t *) * 1);
     list->size = 0;
     list->capacity = 1;
     return list;
 }
 
+static lir_list_t *lir_list_alloc(TraceRecorder *Rec)
+{
+    lir_list_t *list = (lir_list_t *)lir_alloc(Rec, sizeof(*list));
+    return lir_list_init(Rec, list);
+}
+
 static void lir_list_add(TraceRecorder *Rec, lir_list_t *list, lir_inst_t *ir)
 {
+    unsigned i;
+    for (i = 0; i < list->size; i++) {
+        if (list->list[i] == ir) {
+            return;
+        }
+    }
     if (list->size == list->capacity) {
         unsigned newsize = list->capacity * 2;
         list->list = (lir_inst_t **)lir_realloc(
@@ -133,12 +144,35 @@ static void lir_list_add(TraceRecorder *Rec, lir_list_t *list, lir_inst_t *ir)
     list->size += 1;
 }
 
+static void lir_list_remove(lir_list_t *list, lir_inst_t *ir)
+{
+    unsigned i;
+    for (i = 0; i < list->size; i++) {
+        if (list->list[i] == ir) {
+            break;
+        }
+    }
+    if (i != list->size) {
+        list->size -= 1;
+        memmove(list->list + i, list->list + i + 1,
+                sizeof(lir_inst_t *) * (list->size - i));
+    }
+}
+
 static void lir_inst_adduser(TraceRecorder *Rec, lir_inst_t *inst, lir_inst_t *ir)
 {
-    if (inst->user) {
-        inst->user = lir_list_init(Rec);
+    if (inst->user == NULL) {
+        inst->user = lir_list_alloc(Rec);
     }
     lir_list_add(Rec, inst->user, ir);
+}
+
+static void lir_inst_removeuser(lir_inst_t *inst, lir_inst_t *ir)
+{
+    if (inst->user == NULL) {
+        return;
+    }
+    lir_list_remove(inst->user, ir);
 }
 
 static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_size);
@@ -180,6 +214,54 @@ static lir_inst_t **lir_inst_get_args(lir_inst_t *inst, int idx)
     return NULL;
 }
 
+static void update_userinfo(TraceRecorder *Rec, lir_inst_t *inst)
+{
+    lir_inst_t **ref = NULL;
+    int i = 0;
+    while ((ref = lir_inst_get_args(inst, i)) != NULL) {
+        lir_inst_t *user = *ref;
+        if (user) {
+            lir_inst_adduser(Rec, user, inst);
+        }
+        i += 1;
+    }
+}
+
+static void lir_inst_replace_with(TraceRecorder *Rec, lir_inst_t *inst, lir_inst_t *newinst)
+{
+    unsigned i;
+    int j;
+    hashmap_iterator_t itr = { 0, 0 };
+    lir_inst_t **ref = NULL;
+    lir_inst_t *user;
+    // 1. replace argument of inst->user->list[x]
+    if (inst->user) {
+        for (i = 0; i < inst->user->size; i++) {
+            j = 0;
+            user = inst->user->list[i];
+            while ((ref = lir_inst_get_args(user, j)) != NULL) {
+                if (ref && *ref == inst) {
+                    *ref = newinst;
+                }
+                j += 1;
+            }
+        }
+    }
+
+    // 2. replace side exit
+    while (hashmap_next(&TraceRecorderGetTrace(Rec)->StackMap, &itr)) {
+        StackMap *stack = (StackMap *)itr.entry->val;
+        for (j = 0; j < stack->size; j++) {
+            if (inst == stack->regs[j]) {
+                stack->regs[j] = newinst;
+            }
+        }
+    }
+
+    newinst->user = inst->user;
+    inst->user = NULL;
+}
+
 static int lir_inst_define_value(int opcode)
 {
 #define DEF_IR(OPNAME)     \
@@ -194,6 +276,19 @@ case OPCODE_I##OPNAME: \
     return 0;
 }
 
+static int lir_inst_have_side_effect(int opcode)
+{
+#define DEF_SIDE_EFFECT(OPNAME) \
+    case OPCODE_I##OPNAME:      \
+        return GWIR_SIDE_EFFECT_##OPNAME;
+    switch (opcode) {
+        GWIR_EACH(DEF_SIDE_EFFECT);
+    default:
+        assert(0 && "unreachable");
+    }
+#undef DEF_SIDE_EFFECT
+    return 0;
+}
 #if DUMP_LIR > 0
 static void dump_lir_inst(lir_inst_t *Inst);
 #endif /* DUMP_LIR > 0*/
@@ -233,6 +328,7 @@ static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_siz
 
     lir_inst_t *buf = constant_fold_inst(Rec, inst);
     if (buf == inst) {
+        inst->parent = bb;
         buf = CreateInst(Rec, inst, inst_size);
         bb->Insts[bb->size] = buf;
         bb->size += 1;
@@ -240,6 +336,7 @@ static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_siz
 #if DUMP_LIR > 1
     dump_lir_inst(buf);
 #endif
+    update_userinfo(Rec, buf);
     return buf;
 }
 

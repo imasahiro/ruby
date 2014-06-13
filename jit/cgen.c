@@ -578,6 +578,7 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
     CGen gen;
     int id = serial_id++;
 
+    assert(serial_id < 100 && "too many compiled trace");
     if (id == 0) {
         gwjit_context_init();
     }

@@ -10,14 +10,6 @@
 
 #include <sys/time.h> // gettimeofday
 
-#if defined __APPLE__
-#include <mach-o/dyld.h> // _dyld_get_image_name
-#elif defined __linux__
-#include <unistd.h> // readlink
-#endif
-
-#include <sys/stat.h>
-
 #include <limits.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -25,6 +17,9 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <assert.h>
+
+// static const char cmd_template[];
+#include "jit_cgen_cmd.h"
 
 static gwjit_context_t jit_host_context = {};
 
@@ -148,97 +143,17 @@ typedef struct CGen {
     FILE *fp;
     void *hdr;
     const char *path;
+    char *cmd;
+    unsigned cmd_len;
     enum cgen_mode mode;
 } CGen;
 
-static const char cmd_template[] = "clang -pipe -x c "
-                                   "%s %s "
-                                   "-Ijit/ -Ibuild/ -Ibuild/.ext/include/x86_64-darwin13 -Iinclude -I. "
-                                   "-dynamiclib -O" GWIT_CGEN_OPT_LEVEL " -g" GWIT_CGEN_DBG_LEVEL
-                                   " -Wall -o %s %s";
-
-static size_t find_parent_path_end(char *buf, size_t path_len)
+static void cgen_setup_command(CGen *gen, const char *lib, const char *file)
 {
-    size_t end = path_len;
-    while (end > 0 && buf[end - 1] != '/') {
-        end--;
-    }
-    return end;
-}
-
-static void remove_filename(char *buf)
-{
-    size_t pos = find_parent_path_end(buf, strlen(buf));
-    if (buf > 0) {
-        buf[pos] = '\0';
-    }
-}
-
-static int append_path(char *buf, size_t bufsize, const char *path,
-                       size_t psize)
-{
-    size_t len = strlen(buf);
-    if (len + psize >= bufsize) {
-        return 0;
-    }
-    strncpy(buf + len, path, psize);
-    buf[len + psize] = '\0';
-    return 1;
-}
-
-static int file_exists(const char *path)
-{
-    int res = 0;
-#if defined _WIN32
-    DWORD attr = GetFileAttributesA(path);
-    res = (attr != -1);
-#elif defined __linux__ || defined __APPLE__
-    struct stat buf;
-    res = (stat(path, &buf) != -1);
-#endif
-    return res;
-}
-
-static int get_current_executable_path(char *buf, size_t bufsize)
-{
-#ifdef __APPLE__
-    const char *path = _dyld_get_image_name(0);
-    if (realpath(path, buf) != NULL) {
-        return 1;
-    }
-#elif defined __linux__
-    if (readlink("/proc/self/exe", buf, bufsiz) != -1) {
-        return 1;
-    }
-#else
-#error not supported
-#endif
-    return 0;
-}
-
-#define PCH_FILE_NAME "ruby_jit.h.pch"
-
-static int construct_pch_path(char *buf, size_t bufsize)
-{
-    if (get_current_executable_path(buf, bufsize)) {
-        remove_filename(buf);
-        if (append_path(buf, bufsize, PCH_FILE_NAME, strlen(PCH_FILE_NAME))) {
-            if (file_exists(buf)) {
-                return 1;
-            }
-        }
-    }
-#if defined RUBY_LIB_PREFIX
-    buf[0] = '\0';
-    if (append_path(buf, bufsize, RUBY_LIB_PREFIX, strlen(RUBY_LIB_PREFIX))) {
-        if (append_path(buf, bufsize, PCH_FILE_NAME, strlen(PCH_FILE_NAME))) {
-            if (file_exists(buf)) {
-                return 1;
-            }
-        }
-    }
-#endif /* defined RUBY_LIB_PREFIX */
-    return 0;
+    gen->cmd_len = (unsigned) (strlen(cmd_template) + strlen(lib) + strlen(file));
+    gen->cmd = (char *)malloc(gen->cmd_len + 1);
+    memset(gen->cmd, 0, gen->cmd_len);
+    snprintf(gen->cmd, gen->cmd_len, cmd_template, lib, file);
 }
 
 static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
@@ -248,21 +163,8 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
     gen->hdr = NULL;
     timer = getTimeMilliSecond();
     if (gen->mode == PROCESS_MODE) {
-        char cmd[PATH_MAX + 512] = {};
-        const char *pch_path = "";
-        const char *pch_flag = "";
-#if GWJIT_USE_PCH > 0
-        char buf[PATH_MAX];
-        if (construct_pch_path(buf, PATH_MAX)) {
-            pch_path = (const char *)buf;
-            pch_flag = "-include-pch";
-        } else
-#endif
-        {
-            fprintf(stderr, "gwjit cannot use pre compiled header\n");
-        }
-        snprintf(cmd, 512, cmd_template, pch_flag, pch_path, path, "-");
-        gen->fp = popen(cmd, "w");
+        cgen_setup_command(gen, path, "-");
+        gen->fp = popen(gen->cmd, "w");
     } else {
         char fpath[512] = {};
         snprintf(fpath, 512, "/tmp/gwjit.%d.%d.c", getpid(), id);
@@ -285,37 +187,28 @@ static int cgen_freeze(CGen *gen, int id)
 
     if (gen->mode == FILE_MODE) {
         char fpath[512] = {};
-        char cmd[PATH_MAX + 512] = {};
-        const char *pch_path = "";
-        const char *pch_flag = "";
-#if GWJIT_USE_PCH > 0
-        char buf[PATH_MAX];
-        if (construct_pch_path(buf, PATH_MAX)) {
-            pch_path = (const char *)buf;
-            pch_flag = "-include-pch";
-        } else
-#endif
-        {
-            fprintf(stderr, "gwjit cannot use pre compiled header\n");
-        }
-
         snprintf(fpath, 512, "/tmp/gwjit.%d.%d.c", getpid(), id);
-        snprintf(cmd, 512, cmd_template, pch_flag, pch_path, gen->path, fpath);
+        cgen_setup_command(gen, gen->path, fpath);
 
 #if GWJIT_DUMP_COMPILE_LOG > 1
-        fprintf(stderr, "compiling c code : %s\n", cmd);
+        fprintf(stderr, "compiling c code : %s\n", gen->cmd);
 #endif
 #if GWJIT_DUMP_COMPILE_LOG > 0
         fprintf(stderr, "generated c-code is %s\n", gen->path);
 #endif
         fclose(gen->fp);
-        gen->fp = popen(cmd, "w");
+        gen->fp = popen(gen->cmd, "w");
     }
     int success = pclose(gen->fp);
 #if GWJIT_DUMP_COMPILE_LOG > 0
     fprintf(stderr, "native code generation time %llu\n",
             getTimeMilliSecond() - end);
 #endif
+    if (gen->cmd_len > 0) {
+        gen->cmd_len = 0;
+        free(gen->cmd);
+        gen->cmd = NULL;
+    }
     gen->fp = NULL;
     return success;
 }
@@ -609,12 +502,12 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
     return trace->Code;
 }
 
-#define EMIT_CODE(GEN, OP, VAL, LHS, RHS) \
-        cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld, v%ld);\n",\
+#define EMIT_CODE(GEN, OP, VAL, LHS, RHS)                         \
+    cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld, v%ld);\n", \
                 (VAL), lir_getid(LHS), lir_getid(RHS))
 
-#define EMIT_CODE1(GEN, OP, VAL, ARG) \
-        cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld);\n",\
+#define EMIT_CODE1(GEN, OP, VAL, ARG)                       \
+    cgen_printf(gen, "v%ld = rb_jit_exec_" #OP "(v%ld);\n", \
                 (VAL), lir_getid(ARG))
 
 static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
@@ -947,32 +840,32 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     }
     case OPCODE_IFloatEq: {
         IFloatEq *ir = (IFloatEq *)Inst;
-        EMIT_CODE(gen, IFloatEq , Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatEq, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatNe: {
         IFloatNe *ir = (IFloatNe *)Inst;
-        EMIT_CODE(gen, IFloatNe , Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatNe, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatGt: {
         IFloatGt *ir = (IFloatGt *)Inst;
-        EMIT_CODE(gen, IFloatGt , Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatGt, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatGe: {
         IFloatGe *ir = (IFloatGe *)Inst;
-        EMIT_CODE(gen, IFloatGe , Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatGe, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatLt: {
         IFloatLt *ir = (IFloatLt *)Inst;
-        EMIT_CODE(gen, IFloatLt , Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatLt, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFloatLe: {
         IFloatLe *ir = (IFloatLe *)Inst;
-        EMIT_CODE(gen, IFloatLe , Id, ir->LHS, ir->RHS);
+        EMIT_CODE(gen, IFloatLe, Id, ir->LHS, ir->RHS);
         break;
     }
     case OPCODE_IFixnumToFloat: {
@@ -1064,8 +957,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IStringConcat: {
         IStringConcat *ir = (IStringConcat *)Inst;
         cgen_printf(gen, "v%ld = rb_str_plus(v%ld, v%ld);\n", Id,
-                lir_getid(ir->LHS),
-                lir_getid(ir->RHS));
+                    lir_getid(ir->LHS),
+                    lir_getid(ir->RHS));
         break;
     }
     case OPCODE_IStringAdd: {
@@ -1076,7 +969,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IArrayLength: {
         IArrayLength *ir = (IArrayLength *)Inst;
         cgen_printf(gen, "v%ld = LONG2NUM(RARRAY_LEN(v%ld));\n",
-                Id, lir_getid(ir->Recv));
+                    Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IArrayEmptyP: {
@@ -1088,7 +981,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IArrayConcat: {
         IArrayConcat *ir = (IArrayConcat *)Inst;
         cgen_printf(gen, "v%ld = rb_ary_plus(v%ld, v%ld);\n",
-                Id, lir_getid(ir->LHS),
+                    Id, lir_getid(ir->LHS),
                     lir_getid(ir->RHS));
         break;
     }
@@ -1110,7 +1003,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IHashLength: {
         IHashLength *ir = (IHashLength *)Inst;
         cgen_printf(gen, "v%ld = INT2FIX(RHASH_SIZE(v%ld));\n",
-                Id, lir_getid(ir->Recv));
+                    Id, lir_getid(ir->Recv));
         break;
     }
     case OPCODE_IHashEmptyP: {
@@ -1123,7 +1016,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IHashGet: {
         IHashGet *ir = (IHashGet *)Inst;
         cgen_printf(gen, "  v%ld = rb_hash_aref(v%ld, v%ld);\n",
-                Id, lir_getid(ir->Recv),
+                    Id, lir_getid(ir->Recv),
                     lir_getid(ir->Index));
         break;
     }
@@ -1138,8 +1031,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IRegExpMatch: {
         IRegExpMatch *ir = (IRegExpMatch *)Inst;
         cgen_printf(gen, "  v%ld = rb_reg_match(v%ld, v%ld);\n", Id,
-                lir_getid(ir->Re),
-                lir_getid(ir->Str));
+                    lir_getid(ir->Re),
+                    lir_getid(ir->Str));
         break;
     }
     case OPCODE_IObjectToString: {
@@ -1185,8 +1078,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                          "  VALUE val = rb_hash_new();\n");
         for (i = 0; i < ir->argc; i += 2) {
             cgen_printf(gen, "rb_hash_aset(val, v%ld, v%ld);\n",
-                    lir_getid(ir->argv[i]),
-                    lir_getid(ir->argv[i + 1]));
+                        lir_getid(ir->argv[i]),
+                        lir_getid(ir->argv[i + 1]));
         }
         cgen_printf(gen, "  v%ld = val;\n"
                          "}\n",
@@ -1195,9 +1088,9 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         break;
     }
     case OPCODE_IAllocString: {
-        IAllocString *ir = (IAllocString *) Inst;
+        IAllocString *ir = (IAllocString *)Inst;
         cgen_printf(gen, "  v%ld = rb_str_resurrect(v%ld);\n",
-                Id, lir_getid(ir->OrigStr));
+                    Id, lir_getid(ir->OrigStr));
         break;
     }
     case OPCODE_IAllocRange: {
@@ -1213,9 +1106,9 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         break;
     }
     case OPCODE_IAllocRegexFromArray: {
-        IAllocRegexFromArray *ir = (IAllocRegexFromArray *) Inst;
+        IAllocRegexFromArray *ir = (IAllocRegexFromArray *)Inst;
         cgen_printf(gen, "  v%ld = rb_reg_new_ary(v%ld, %d);\n",
-                Id, lir_getid(ir->Ary), ir->opt);
+                    Id, lir_getid(ir->Ary), ir->opt);
         break;
     }
 
@@ -1350,7 +1243,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                     ir->ci);
         for (i = 0; i < ir->argc; i++) {
             cgen_printf(gen, "(GET_SP())[%d] = v%ld;\n",
-                    i, lir_getid(ir->argv[i]));
+                        i, lir_getid(ir->argv[i]));
         }
         cgen_printf(
             gen,
@@ -1461,36 +1354,36 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
 // We want to enable dtrace for compatibility but we have no time to
 // implement.
 #if 0
-      ITrace *ir = (ITrace *) Inst;
-      cgen_printf(gen,
-                  "{\n"
-                  "  rb_event_flag_t flag = (rb_event_flag_t)%ld;\n"
-                  "  if (RUBY_DTRACE_METHOD_ENTRY_ENABLED() ||\n"
-                  "      RUBY_DTRACE_METHOD_RETURN_ENABLED() ||\n"
-                  "      RUBY_DTRACE_CMETHOD_ENTRY_ENABLED() ||\n"
-                  "      RUBY_DTRACE_CMETHOD_RETURN_ENABLED()) {\n"
-                  "\n"
-                  "    switch(flag) {\n"
-                  "      case RUBY_EVENT_CALL:\n"
-                  "        RUBY_DTRACE_METHOD_ENTRY_HOOK(th, 0, 0);\n"
-                  "        break;\n"
-                  "      case RUBY_EVENT_C_CALL:\n"
-                  "        RUBY_DTRACE_CMETHOD_ENTRY_HOOK(th, 0, 0);\n"
-                  "        break;\n"
-                  "      case RUBY_EVENT_RETURN:\n"
-                  "        RUBY_DTRACE_METHOD_RETURN_HOOK(th, 0, 0);\n"
-                  "        break;\n"
-                  "      case RUBY_EVENT_C_RETURN:\n"
-                  "        RUBY_DTRACE_CMETHOD_RETURN_HOOK(th, 0, 0);\n"
-                  "        break;\n"
-                  "    }\n"
-                  "  }\n"
-                  "\n"
-                  "  EXEC_EVENT_HOOK(th, flag, GET_SELF(), 0,\n"
-                  "                  0/*id and klass are resolved at callee */,\n"
-                  "                  (flag & (RUBY_EVENT_RETURN |\n"
-                  "                  RUBY_EVENT_B_RETURN)) ? TOPN(0) : Qundef);\n"
-                  "}\n", ir->Flag);
+                            ITrace *ir = (ITrace *) Inst;
+                            cgen_printf(gen,
+                                    "{\n"
+                                    "  rb_event_flag_t flag = (rb_event_flag_t)%ld;\n"
+                                    "  if (RUBY_DTRACE_METHOD_ENTRY_ENABLED() ||\n"
+                                    "      RUBY_DTRACE_METHOD_RETURN_ENABLED() ||\n"
+                                    "      RUBY_DTRACE_CMETHOD_ENTRY_ENABLED() ||\n"
+                                    "      RUBY_DTRACE_CMETHOD_RETURN_ENABLED()) {\n"
+                                    "\n"
+                                    "    switch(flag) {\n"
+                                    "      case RUBY_EVENT_CALL:\n"
+                                    "        RUBY_DTRACE_METHOD_ENTRY_HOOK(th, 0, 0);\n"
+                                    "        break;\n"
+                                    "      case RUBY_EVENT_C_CALL:\n"
+                                    "        RUBY_DTRACE_CMETHOD_ENTRY_HOOK(th, 0, 0);\n"
+                                    "        break;\n"
+                                    "      case RUBY_EVENT_RETURN:\n"
+                                    "        RUBY_DTRACE_METHOD_RETURN_HOOK(th, 0, 0);\n"
+                                    "        break;\n"
+                                    "      case RUBY_EVENT_C_RETURN:\n"
+                                    "        RUBY_DTRACE_CMETHOD_RETURN_HOOK(th, 0, 0);\n"
+                                    "        break;\n"
+                                    "    }\n"
+                                    "  }\n"
+                                    "\n"
+                                    "  EXEC_EVENT_HOOK(th, flag, GET_SELF(), 0,\n"
+                                    "                  0/*id and klass are resolved at callee */,\n"
+                                    "                  (flag & (RUBY_EVENT_RETURN |\n"
+                                    "                  RUBY_EVENT_B_RETURN)) ? TOPN(0) : Qundef);\n"
+                                    "}\n", ir->Flag);
 #endif
         break;
     }

@@ -1,9 +1,0 @@
-#!/bin/sh
-
-FILE_PATTERN="^jit/.*\.(c|h)$"
-for file in `git diff-index --cached --name-only HEAD --diff-filter=ACMR |
-             egrep $FILE_PATTERN`; do
-   echo $file
-   git clang-format $file
-   git add          $file
-done

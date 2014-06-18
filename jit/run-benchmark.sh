@@ -59,7 +59,6 @@ LIST="$LIST benchmark/bm_so_random.rb"
 #LIST="$LIST test-jit/bm_vm2_newhash.rb"
 
 make -j8 -C build
-ruby ./jit/make_pch.rb
 rm -rf bmlog-* /tmp/gwjit.*
 
 mkdir -p benchmark-tmp

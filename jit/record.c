@@ -1144,7 +1144,8 @@ static void record_opt_call_c_function(TraceRecorder *Rec,
 static void record_bitblt(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                           VALUE *reg_pc)
 {
-    not_support_op(Rec, reg_cfp, reg_pc, "bitblt");
+    VALUE str = rb_str_new2("a bit of bacon, lettuce and tomato");
+    _PUSH(EmitLoadConst(Rec, str));
 }
 
 static void record_answer(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,

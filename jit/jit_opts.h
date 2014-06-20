@@ -25,8 +25,7 @@
 #define GWJIT_DUMP_COMPILE_LOG 2 /* 0:disable, 1:dump, 2:verbose */
 #define GWJIT_USE_PCH 1 /* 0:none,    1:use pre-compiled header */
 #define GWIR_MIN_TRACE_LENGTH 8 /* min length of instructions gwjit compile */
-#define GWIR_MAX_TRACE_LENGTH \
-    1024 /* max length of instructions gwjit compile */
+#define GWIR_MAX_TRACE_LENGTH 1024 /* max length of instructions gwjit compile */
 #define GWIR_TRACE_INIT_SIZE 16 /* initial size of trace */
 #define GWIR_RESERVED_REGSTACK_SIZE 8
 

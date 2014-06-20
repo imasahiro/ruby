@@ -91,25 +91,25 @@ static lir_t AdjustStack(TraceRecorder *Rec)
     BasicBlockReplace(Rec->EntryBlock, jumpIdx - 1, jumpIdx);
     Rec->Block = PrevBB;
 #if 0
-  /*
-   *      before     |   after
-   * L0: StackAdjust | StackAdjust
-   * L1: StackPop(1) | StackPop(2)
-   * L2: StackPop(0) | StackPop(1)  <- jumpIdx - 2
-   * L3: StackPop(2) | StackPop(0)  <- jumpIdx - 1
-   * L4: Jump Block  | Jump Block   <- jumpIdx
-   */
-  if (jumpIdx > 2) {
-    // Insts.insert(1, last)
-    lir_compile_data_header_t *prev = Insts[1];
-    int i;
-    for (i = 2; i < jumpIdx; i++) {
-      lir_compile_data_header_t *tmp = Insts[i];
-      Insts[i] = prev;
-      prev     = tmp;
+    /*
+     *      before     |   after
+     * L0: StackAdjust | StackAdjust
+     * L1: StackPop(1) | StackPop(2)
+     * L2: StackPop(0) | StackPop(1)  <- jumpIdx - 2
+     * L3: StackPop(2) | StackPop(0)  <- jumpIdx - 1
+     * L4: Jump Block  | Jump Block   <- jumpIdx
+     */
+    if (jumpIdx > 2) {
+        // Insts.insert(1, last)
+        lir_compile_data_header_t *prev = Insts[1];
+        int i;
+        for (i = 2; i < jumpIdx; i++) {
+            lir_compile_data_header_t *tmp = Insts[i];
+            Insts[i] = prev;
+            prev     = tmp;
+        }
+        Insts[1] = last;
     }
-    Insts[1] = last;
-  }
 #endif
     return Reg;
 }

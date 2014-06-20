@@ -1060,11 +1060,11 @@ class RubyVM
         operands_num_info << "  #{num},\n"
         operands_macro << "OP(#{insn.name})\\\n"
 
-        stack_increase << <<-EOS
-        case BIN(#{insn.name}):{
-          #{insn.sp_increase_c_expr(:record)}
-        }
-        EOS
+        #stack_increase << <<-EOS
+        #case BIN(#{insn.name}):{
+        #  #{insn.sp_increase_c_expr(:record)}
+        #}
+        #EOS
       }
 
       ERB.new(vpath.read('template/vmrecord.inc.tmpl')).result(binding)

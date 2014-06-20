@@ -171,6 +171,26 @@ static lir_inst_t *fold_binop_float2(TraceRecorder *Rec, lir_folder_t folder, li
 
 static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val);
 
+static lir_inst_t *remove_overflow_check(TraceRecorder *Rec, lir_inst_t *inst)
+{
+    IFixnumAdd *ir = (IFixnumAdd *) inst;
+    switch(lir_opcode(inst)) {
+    case OPCODE_IFixnumAdd:
+        return Emit_FixnumAdd(Rec, ir->LHS, ir->RHS);
+    case OPCODE_IFixnumSub:
+        return Emit_FixnumSub(Rec, ir->LHS, ir->RHS);
+    case OPCODE_IFixnumMul:
+        return Emit_FixnumMul(Rec, ir->LHS, ir->RHS);
+    case OPCODE_IFixnumDiv:
+        return Emit_FixnumDiv(Rec, ir->LHS, ir->RHS);
+    case OPCODE_IFixnumMod:
+        return Emit_FixnumMod(Rec, ir->LHS, ir->RHS);
+    default:
+        break;
+    }
+    return inst;
+}
+
 static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
 {
     ILoadConstObject *Val = (ILoadConstObject *)*lir_inst_get_args(inst, 0);

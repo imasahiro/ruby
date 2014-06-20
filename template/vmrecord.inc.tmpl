@@ -24,13 +24,13 @@ static int insn_len(VALUE insn)
   return insns_len_info[(int)insn];
 }
 
-static int
-insn_stack_increase(int depth, int insn, VALUE *opes)
-{
-  switch(insn){
-<%= stack_increase %>
-  default:
-    rb_bug("insn_sp_increase: unreachable");
-  }
-  return 0;
-}
+//static int
+//insn_stack_increase(int depth, int insn, VALUE *opes)
+//{
+//  switch(insn){
+//<%= stack_increase %>
+//  default:
+//    rb_bug("insn_sp_increase: unreachable");
+//  }
+//  return 0;
+//}

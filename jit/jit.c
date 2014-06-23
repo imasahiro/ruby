@@ -266,15 +266,27 @@ struct Trace {
     unsigned constpool_capacity;
 };
 
-static void RJitSetMode(RJit *Jit, TraceMode mode)
-{
-    Jit->mode_ = mode;
-    fprintf(stderr, "jit mode = %d\n", mode);
-}
-
 static int RJitModeIs(RJit *Jit, TraceMode mode)
 {
     return (Jit->mode_ & mode) == mode;
+}
+
+static void RJitSetMode(RJit *Jit, TraceMode mode)
+{
+    Jit->mode_ = mode;
+#if 1
+    fprintf(stderr, "jit mode = ");
+    if (mode == TRACE_MODE_DEFAULT) {
+        fprintf(stderr, "default");
+    }
+    else {
+        fprintf(stderr, "record");
+        if (RJitModeIs(Jit, TRACE_MODE_EMIT_BACKWARD_BRANCH)) {
+            fprintf(stderr, "|backward_branch");
+        }
+    }
+    fprintf(stderr, "\n");
+#endif
 }
 
 static void jit_mark(void *ptr)

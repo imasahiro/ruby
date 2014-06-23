@@ -279,6 +279,7 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 
     // user defined ruby method
     if (ci->me && ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
+        // FIXME we need to implement vm_callee_setup_arg()
         EmitPushFrame(Rec, reg_pc, ci, Rblock, block);
         //EmitJump(Rec, reg_pc, 0);
         return;
@@ -744,8 +745,11 @@ static void record_send(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
         not_support_op(Rec, reg_cfp, reg_pc, "send");
         return;
     } else if (ci->blockiseq != 0) {
+        ci->blockptr = RUBY_VM_GET_BLOCK_PTR_IN_CFP(reg_cfp);
+        ci->blockptr->iseq = ci->blockiseq;
+        ci->blockptr->proc = 0;
         Rblock = EmitIR(LoadSelfAsBlock, ci->blockiseq);
-        block = RUBY_VM_GET_BLOCK_PTR_IN_CFP(reg_cfp);
+        block = ci->blockptr;
     }
 
     if (UNLIKELY(ci->flag & VM_CALL_ARGS_SPLAT)) {

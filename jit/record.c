@@ -185,7 +185,7 @@ static void EmitSpecialInst0(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci,
         vm_search_method(ci, params[0]);
         ci = CloneInlineCache(&Rec->CacheMng, ci);
         EmitIR(GuardMethodCache, pc, regs[0], ci);
-        Rval = EmitIR(InvokeMethod, ci, 2, regs);
+        Rval = EmitIR(InvokeMethod, ci, ci->argc + 1, regs);
     }
     _PUSH(Rval);
 }
@@ -307,7 +307,12 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
         return;
     }
 
-    // unreachable
+    // re-push registers
+    int i;
+    for (i = 0; i < ci->argc + 1; i++) {
+        _PUSH(regs[i]);
+    }
+    RJitSetMode(Rec->jit, Rec->jit->mode_ | TRACE_MODE_EMIT_BACKWARD_BRANCH);
     TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_NATIVE_METHOD);
     return;
 }

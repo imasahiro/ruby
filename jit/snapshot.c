@@ -116,8 +116,7 @@ static lir_t AdjustStack(TraceRecorder *Rec)
 
 static void PushRegister(TraceRecorder *Rec, lir_t Reg)
 {
-    if (Rec->RegStackSize + GWIR_RESERVED_REGSTACK_SIZE
-        == Rec->RegStackCapacity) {
+    if (Rec->RegStackSize + GWIR_RESERVED_REGSTACK_SIZE == Rec->RegStackCapacity) {
         unsigned newsize = Rec->RegStackCapacity * 2;
         lir_t *RegStack = (lir_t *)lir_realloc(
             Rec, Rec->RegStack - GWIR_RESERVED_REGSTACK_SIZE,

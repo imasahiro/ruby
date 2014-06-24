@@ -1347,45 +1347,45 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     //  break;
     //}
     case OPCODE_ITrace: {
-// FIXME
-// When we enable trace code, clang saied error.
-// >> error: Must have a valid dtrace stability entry'
-// >> ld: error creating dtrace DOF section for architecture x86_64'
-// We want to enable dtrace for compatibility but we have no time to
-// implement.
 #if 0
-                            ITrace *ir = (ITrace *) Inst;
-                            cgen_printf(gen,
-                                    "{\n"
-                                    "  rb_event_flag_t flag = (rb_event_flag_t)%ld;\n"
-                                    "  if (RUBY_DTRACE_METHOD_ENTRY_ENABLED() ||\n"
-                                    "      RUBY_DTRACE_METHOD_RETURN_ENABLED() ||\n"
-                                    "      RUBY_DTRACE_CMETHOD_ENTRY_ENABLED() ||\n"
-                                    "      RUBY_DTRACE_CMETHOD_RETURN_ENABLED()) {\n"
-                                    "\n"
-                                    "    switch(flag) {\n"
-                                    "      case RUBY_EVENT_CALL:\n"
-                                    "        RUBY_DTRACE_METHOD_ENTRY_HOOK(th, 0, 0);\n"
-                                    "        break;\n"
-                                    "      case RUBY_EVENT_C_CALL:\n"
-                                    "        RUBY_DTRACE_CMETHOD_ENTRY_HOOK(th, 0, 0);\n"
-                                    "        break;\n"
-                                    "      case RUBY_EVENT_RETURN:\n"
-                                    "        RUBY_DTRACE_METHOD_RETURN_HOOK(th, 0, 0);\n"
-                                    "        break;\n"
-                                    "      case RUBY_EVENT_C_RETURN:\n"
-                                    "        RUBY_DTRACE_CMETHOD_RETURN_HOOK(th, 0, 0);\n"
-                                    "        break;\n"
-                                    "    }\n"
-                                    "  }\n"
-                                    "\n"
-                                    "  EXEC_EVENT_HOOK(th, flag, GET_SELF(), 0,\n"
-                                    "                  0/*id and klass are resolved at callee */,\n"
-                                    "                  (flag & (RUBY_EVENT_RETURN |\n"
-                                    "                  RUBY_EVENT_B_RETURN)) ? TOPN(0) : Qundef);\n"
-                                    "}\n", ir->Flag);
-#endif
+        ITrace* ir = (ITrace*)Inst;
+        // FIXME
+        // When we enable trace code, clang saied error.
+        // >> error: Must have a valid dtrace stability entry'
+        // >> ld: error creating dtrace DOF section for architecture x86_64'
+        // We want to enable dtrace for compatibility but we have no time to
+        // implement.
+        cgen_printf(gen,
+                "{\n"
+                "  rb_event_flag_t flag = (rb_event_flag_t)%ld;\n"
+                "  if (RUBY_DTRACE_METHOD_ENTRY_ENABLED() ||\n"
+                "      RUBY_DTRACE_METHOD_RETURN_ENABLED() ||\n"
+                "      RUBY_DTRACE_CMETHOD_ENTRY_ENABLED() ||\n"
+                "      RUBY_DTRACE_CMETHOD_RETURN_ENABLED()) {\n"
+                "\n"
+                "    switch(flag) {\n"
+                "      case RUBY_EVENT_CALL:\n"
+                "        RUBY_DTRACE_METHOD_ENTRY_HOOK(th, 0, 0);\n"
+                "        break;\n"
+                "      case RUBY_EVENT_C_CALL:\n"
+                "        RUBY_DTRACE_CMETHOD_ENTRY_HOOK(th, 0, 0);\n"
+                "        break;\n"
+                "      case RUBY_EVENT_RETURN:\n"
+                "        RUBY_DTRACE_METHOD_RETURN_HOOK(th, 0, 0);\n"
+                "        break;\n"
+                "      case RUBY_EVENT_C_RETURN:\n"
+                "        RUBY_DTRACE_CMETHOD_RETURN_HOOK(th, 0, 0);\n"
+                "        break;\n"
+                "    }\n"
+                "  }\n"
+                "\n"
+                "  EXEC_EVENT_HOOK(th, flag, GET_SELF(), 0,\n"
+                "                  0/*id and klass are resolved at callee */,\n"
+                "                  (flag & (RUBY_EVENT_RETURN |\n"
+                "                  RUBY_EVENT_B_RETURN)) ? TOPN(0) : Qundef);\n"
+                "}\n", ir->Flag);
         break;
+#endif
     }
     default:
         assert(false && "unreachable");

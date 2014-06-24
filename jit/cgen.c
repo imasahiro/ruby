@@ -1096,7 +1096,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
     case OPCODE_IAllocRange: {
         IAllocRange *ir = (IAllocRange *)Inst;
         cgen_printf(gen, "{\n"
-                         "  long index = %d;\n"
+                         "  long flag = %d;\n"
                          "  VALUE low  = v%ld;\n"
                          "  VALUE high = v%ld;\n"
                          "  v%ld = rb_range_new(low, high, flag);\n"
@@ -1156,7 +1156,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                     "{\n"
                     "  ISEQ blockiseq = (ISEQ) %p;\n"
                     "  v%ld = (VALUE) RUBY_VM_GET_BLOCK_PTR_IN_CFP(reg_cfp);\n"
-                    "  assert(((rb_block_t *)v%ld)->iseq == NULL);\n"
+                    "  /*assert(((rb_block_t *)v%ld)->iseq == NULL);*/\n"
                     "  ((rb_block_t *)v%ld)->iseq = blockiseq;\n"
                     "}\n",
                     ir->iseq, Id, Id, Id);
@@ -1384,8 +1384,8 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
                 "                  (flag & (RUBY_EVENT_RETURN |\n"
                 "                  RUBY_EVENT_B_RETURN)) ? TOPN(0) : Qundef);\n"
                 "}\n", ir->Flag);
-        break;
 #endif
+        break;
     }
     default:
         assert(false && "unreachable");

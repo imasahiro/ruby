@@ -226,7 +226,7 @@ static void EmitPushFrame(TraceRecorder *Rec, VALUE *reg_pc, CALL_INFO ci,
         EmitIR(GuardBlockEqual, reg_pc, Rblock, (VALUE)block);
     }
     PushCallStack(Rec, argc, argv);
-    _PUSH(EmitIR(FramePush, ci, 0, Rblock, argc, argv));
+    EmitIR(FramePush, ci, 0, Rblock, argc, argv);
 }
 
 static void EmitNewInstance(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,

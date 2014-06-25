@@ -851,7 +851,7 @@ goruby.$(OBJEXT): {$(VPATH)}goruby.c {$(VPATH)}main.c $(RUBY_H_INCLUDES) \
 
 jit_cgen_cmd.h: $(srcdir)/jit/ruby_jit.h $(srcdir)/jit/jit_context_api.h \
 	$(srcdir)/jit/jit_context.h  $(srcdir)/jit/make_pch.rb
-	$(Q) $(BASERUBY) $(srcdir)/jit/make_pch.rb $@ $(srcdir) $(CC) > $@
+	$(Q) $(BASERUBY) $(srcdir)/jit/make_pch.rb . $(srcdir) $(CC) $(arch) > $@
 
 gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb \
   {$(VPATH)}jit/ruby_jit.h

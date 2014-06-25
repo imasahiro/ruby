@@ -4,6 +4,7 @@ source_dir = "."
 target_dir = "build"
 debug_mode = !true
 cc         = "clang"
+arch       = "x86_64-darwin13"
 
 opt        = 3
 debug      = 0
@@ -25,12 +26,16 @@ if ARGV.size > 2
   cc = ARGV[2]
 end
 
+if ARGV.size > 3
+  arch = ARGV[3]
+end
+
 target_path = File.realpath(File.dirname(target_dir))
 source_path = File.realpath(source_dir)
 
 header_paths = "-I#{target_path}"
 header_paths += " -I#{source_path}"
-header_paths += " -I#{target_path}/.ext/include/x86_64-darwin13/"
+header_paths += " -I#{target_path}/.ext/include/#{arch}/"
 header_paths += " -I#{source_path}/include/ -I#{source_path}"
 
 cmd = "#{cc} -pipe -O#{opt} -g#{debug} -x c-header #{header_paths} \
@@ -43,4 +48,7 @@ path = File.join(target_path, 'ruby_jit.h.pch')
 print "static const char cmd_template[] = "
 print "\"#{cc} -pipe -O#{opt} -g#{debug} -x c #{header_paths}"
 print " -I#{source_path}/jit/"
-print " -dynamiclib -include-pch #{path} -Wall -o %s %s\";";
+if cc == "clang"
+  print " -include-pch #{path}"
+end
+print " -dynamiclib -Wall -o %s %s\";";

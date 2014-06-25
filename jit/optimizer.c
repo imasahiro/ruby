@@ -194,7 +194,6 @@ static lir_inst_t *remove_overflow_check(TraceRecorder *Rec, lir_inst_t *inst)
 static lir_inst_t* fold_binop_cast(TraceRecorder* Rec, lir_folder_t folder, lir_inst_t* inst)
 {
     ILoadConstObject *Val = (ILoadConstObject *)*lir_inst_get_args(inst, 0);
-    int opcode = lir_opcode(inst);
     int vopcode = lir_opcode(&Val->base);
     VALUE val = Qundef;
     switch (lir_opcode(inst)) {

@@ -108,11 +108,11 @@ static lir_t EmitSpecialInst_StringFreeze(TraceRecorder *Rec, CALL_INFO ci,
     return _POP();
 }
 
-static lir_t EmitSpecialInst_FixnumToFixnum(TraceRecorder* Rec, CALL_INFO ci,
-                                            lir_t* regs)
-{
-    return regs[0];
-}
+//static lir_t EmitSpecialInst_FixnumToFixnum(TraceRecorder* Rec, CALL_INFO ci,
+//                                            lir_t* regs)
+//{
+//    return regs[0];
+//}
 
 static lir_t EmitSpecialInst_FloatToFloat(TraceRecorder* Rec, CALL_INFO ci,
                                           lir_t* regs)

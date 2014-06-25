@@ -868,6 +868,29 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         EMIT_CODE(gen, IFloatLe, Id, ir->LHS, ir->RHS);
         break;
     }
+    //case OPCODE_IObjectNot: {
+    //    IObjectNot *ir = (IObjectNot *)Inst;
+    //    cgen_printf(gen, "v%ld = (RTEST(v%ld) == 0) ? Qfalse : Qtrue;\n",
+    //                Id, lir_getid(ir->Recv));
+    //    break;
+    //}
+    //case OPCODE_IObjectEq: {
+    //    IObjectNot *ir = (IObjectNot *)Inst;
+    //    cgen_printf(gen, "v%ld = (RTEST(v%ld) == 0) ? Qtrue : Qfalse;\n",
+    //                Id, lir_getid(ir->Recv));
+    //    break;
+    //}
+    //case OPCODE_IObjectNe: {
+    //    IObjectNot *ir = (IObjectNot *)Inst;
+    //    cgen_printf(gen, "v%ld = (RTEST(v%ld) == 0) ? Qtrue : Qfalse;\n",
+    //                Id, lir_getid(ir->Recv));
+    //    break;
+    //}
+    case OPCODE_IObjectToString: {
+        IObjectToString *ir = (IObjectToString *)Inst;
+        EMIT_CODE1(gen, IObjectToString, Id, ir->Val);
+        break;
+    }
     case OPCODE_IFixnumToFloat: {
         IFixnumToFloat *ir = (IFixnumToFloat *)Inst;
         cgen_printf(gen, "v%ld = DBL2NUM((double) FIX2LONG(v%ld));\n", Id,
@@ -1033,11 +1056,6 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         cgen_printf(gen, "  v%ld = rb_reg_match(v%ld, v%ld);\n", Id,
                     lir_getid(ir->Re),
                     lir_getid(ir->Str));
-        break;
-    }
-    case OPCODE_IObjectToString: {
-        IObjectToString *ir = (IObjectToString *)Inst;
-        EMIT_CODE1(gen, IObjectToString, Id, ir->Val);
         break;
     }
     case OPCODE_IAllocObject: {

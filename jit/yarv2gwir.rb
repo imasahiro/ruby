@@ -41,6 +41,10 @@ DATA = [
   ["FloatLt", "opt_lt",  "<",  [:Float, :Float]],
   ["FloatLe", "opt_le",  "<=", [:Float, :Float]],
 
+  #["ObjectNot", "opt_not", "!",  [:_]],
+  #["ObjectNe",  "opt_neq", "!=", [:_, :_]],
+  #["ObjectEq",  "opt_eq",  "==", [:_, :_]],
+
   ["MathSin",   "opt_send_simple", "sin",   [:Math, :_]],
   ["MathCos",   "opt_send_simple", "cos",   [:Math, :_]],
   ["MathTan",   "opt_send_simple", "tan",   [:Math, :_]],
@@ -342,13 +346,13 @@ DATA.each.with_index { |op, i|
 
   param << argc(arg.length)
   if !mname.empty? && mname != "#getter" && mname != "#setter"
-    if arg.length > 0
+    if arg.length > 0 && arg[0].to_sym != :_
       param << unredefined(arg[0].to_sym, mname, :guard)
     end
   end
 
   arg.map.with_index { |v, i|
-    if arg[i].to_s != :_
+    if arg[i] != :_
       param << type(i, v, :guard)
     else
       param << type(i, v)

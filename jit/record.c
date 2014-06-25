@@ -145,6 +145,36 @@ static lir_t EmitSpecialInst_StringFreeze(TraceRecorder *Rec, CALL_INFO ci,
     return _POP();
 }
 
+//static lir_t EmitSpecialInst_ObjectNot(TraceRecorder *Rec, CALL_INFO ci,
+//                                        lir_t *regs)
+//{
+//    ci = CloneInlineCache(&Rec->CacheMng, ci);
+//    EmitIR(GuardMethodCache, Rec->CurrentEvent->pc, regs[0], ci);
+//    extern VALUE rb_obj_not(VALUE obj);
+//    if (check_cfunc(ci->me, rb_obj_not)) {
+//        return EmitIR(ObjectNot, regs[0]);
+//    }
+//    else {
+//        return EmitIR(InvokeMethod, ci, ci->argc + 1, regs);
+//    }
+//}
+//
+//static lir_t EmitSpecialInst_ObjectNe(TraceRecorder *Rec, CALL_INFO ci,
+//                                        lir_t *regs)
+//{
+//    ci = CloneInlineCache(&Rec->CacheMng, ci);
+//    EmitIR(GuardMethodCache, Rec->CurrentEvent->pc, regs[0], ci);
+//    return EmitIR(InvokeMethod, ci, ci->argc + 1, regs);
+//}
+//
+//static lir_t EmitSpecialInst_ObjectEq(TraceRecorder *Rec, CALL_INFO ci,
+//                                        lir_t *regs)
+//{
+//    ci = CloneInlineCache(&Rec->CacheMng, ci);
+//    EmitIR(GuardMethodCache, Rec->CurrentEvent->pc, regs[0], ci);
+//    return EmitIR(InvokeMethod, ci, ci->argc + 1, regs);
+//}
+
 static lir_t EmitSpecialInst_GetPropertyName(TraceRecorder *Rec, CALL_INFO ci,
                                              lir_t *regs)
 {

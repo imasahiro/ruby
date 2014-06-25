@@ -110,8 +110,6 @@ static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
     } else if (!SPECIAL_CONST_P(val)) {
         if (RBASIC_CLASS(val) == rb_cString) {
             Rval = EmitIR(LoadConstString, val);
-        } else if (RBASIC_CLASS(val) == rb_cString) {
-            Rval = EmitIR(LoadConstString, val);
         } else if (RBASIC_CLASS(val) == rb_cRegexp) {
             Rval = EmitIR(LoadConstRegexp, val);
         }
@@ -532,7 +530,7 @@ static void record_putstring(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                              VALUE *reg_pc)
 {
     VALUE val = (VALUE)GET_OPERAND(1);
-    lir_t Rstr = EmitIR(LoadConstString, val);
+    lir_t Rstr = EmitLoadConst(Rec, val);
     _PUSH(EmitIR(AllocString, Rstr));
 }
 

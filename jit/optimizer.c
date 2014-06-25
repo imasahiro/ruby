@@ -8,6 +8,8 @@
 
  **********************************************************************/
 
+static lir_t EmitLoadConst(TraceRecorder* Rec, VALUE val);
+
 typedef VALUE (*lir_folder1_t)(VALUE);
 typedef VALUE (*lir_folder2_t)(VALUE, VALUE);
 
@@ -149,7 +151,7 @@ static lir_inst_t *fold_binop_fixnum2(TraceRecorder *Rec, lir_folder_t folder, l
     // const + const
     if (lop == OPCODE_ILoadConstFixnum && rop == OPCODE_ILoadConstFixnum) {
         VALUE val = ((lir_folder2_t)folder)(LHS->Val, RHS->Val);
-        return Emit_LoadConstFixnum(Rec, val);
+        return EmitLoadConst(Rec, val);
     }
     return inst;
 }
@@ -164,12 +166,10 @@ static lir_inst_t *fold_binop_float2(TraceRecorder *Rec, lir_folder_t folder, li
     if (lop == OPCODE_ILoadConstFloat && rop == OPCODE_ILoadConstFloat) {
         // FIXME need to insert GuardTypeFlonum?
         VALUE val = ((lir_folder2_t)folder)(LHS->Val, RHS->Val);
-        return Emit_LoadConstFloat(Rec, val);
+        return EmitLoadConst(Rec, val);
     }
     return inst;
 }
-
-static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val);
 
 static lir_inst_t *remove_overflow_check(TraceRecorder *Rec, lir_inst_t *inst)
 {
@@ -194,18 +194,45 @@ static lir_inst_t *remove_overflow_check(TraceRecorder *Rec, lir_inst_t *inst)
 static lir_inst_t* fold_binop_cast(TraceRecorder* Rec, lir_folder_t folder, lir_inst_t* inst)
 {
     ILoadConstObject *Val = (ILoadConstObject *)*lir_inst_get_args(inst, 0);
+    int opcode = lir_opcode(inst);
+    int vopcode = lir_opcode(&Val->base);
     VALUE val = Qundef;
-    switch(lir_opcode(&Val->base)) {
-    case OPCODE_ILoadConstNil:
-    case OPCODE_ILoadConstObject:
-    case OPCODE_ILoadConstBoolean:
-    case OPCODE_ILoadConstFixnum:
-    case OPCODE_ILoadConstFloat:
-    case OPCODE_ILoadConstString:
-    case OPCODE_ILoadConstRegexp:
-        val = ((lir_folder1_t)folder)(Val->Val);
-        return EmitLoadConst(Rec, val);
-    default:
+    switch (lir_opcode(inst)) {
+    case OPCODE_IFixnumToFloat:
+    case OPCODE_IFixnumToString:
+        if (vopcode == OPCODE_ILoadConstFixnum) {
+            val = ((lir_folder1_t)folder)(Val->Val);
+            return EmitLoadConst(Rec, val);
+        }
+        break;
+    case OPCODE_IFloatToFixnum:
+    case OPCODE_IFloatToString:
+        if (vopcode == OPCODE_ILoadConstFloat) {
+            val = ((lir_folder1_t)folder)(Val->Val);
+            return EmitLoadConst(Rec, val);
+        }
+        break;
+    case OPCODE_IStringToFixnum:
+    case OPCODE_IStringToFloat:
+        if (vopcode == OPCODE_ILoadConstFloat) {
+            val = ((lir_folder1_t)folder)(Val->Val);
+            return EmitLoadConst(Rec, val);
+        }
+        break;
+    case OPCODE_IObjectToString:
+        switch (vopcode) {
+        case OPCODE_ILoadConstNil:
+        case OPCODE_ILoadConstObject:
+        case OPCODE_ILoadConstBoolean:
+        case OPCODE_ILoadConstFixnum:
+        case OPCODE_ILoadConstFloat:
+        case OPCODE_ILoadConstString:
+        case OPCODE_ILoadConstRegexp:
+            val = ((lir_folder1_t)folder)(Val->Val);
+            return EmitLoadConst(Rec, val);
+        default:
+            break;
+        }
         break;
     }
     return inst;
@@ -276,14 +303,14 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
     }
 
     switch (lir_opcode(inst)) {
+    case OPCODE_IFixnumToFloat:
+    case OPCODE_IFixnumToString:
+    case OPCODE_IFloatToFixnum:
+    case OPCODE_IFloatToString:
+    case OPCODE_IStringToFixnum:
+    case OPCODE_IStringToFloat:
     case OPCODE_IObjectToString:
         return fold_binop_cast(Rec, folder, inst);
-    //case OPCODE_IFixnumToFloat :
-    //case OPCODE_IFixnumToString :
-    //case OPCODE_IFloatToFixnum :
-    //case OPCODE_IFloatToString :
-    //case OPCODE_IStringToFixnum :
-    //case OPCODE_IStringToFloat :
 
     //case OPCODE_IFixnumComplement :
     //case OPCODE_IMathSin :

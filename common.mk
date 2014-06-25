@@ -854,10 +854,10 @@ jit_cgen_cmd.h: $(srcdir)/jit/ruby_jit.h $(srcdir)/jit/jit_context_api.h \
 	$(srcdir)/jit/gwir_template.h
 	$(Q) $(BASERUBY) $(srcdir)/jit/make_pch.rb . $(srcdir) $(CC) $(arch) > $@
 
-gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb \
-  {$(VPATH)}jit/ruby_jit.h
+gwir.c: $(srcdir)/jit/gwir.def $(srcdir)/jit/gwir.rb \
+  $(srcdir)/jit/gwir_template.h
 	$(ECHO) creating $@
-	$(Q) $(BASERUBY) "$(srcdir)/jit/gwir.rb" $(srcdir)/jit/gwir.def $(srcdir)/jit/ruby_jit.h > $@
+	$(Q) $(BASERUBY) "$(srcdir)/jit/gwir.rb" $(srcdir)/jit/gwir.def $(srcdir)/jit/gwir_template.h > $@
 
 yarv2gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/yarv2gwir.rb
 	$(ECHO) creating $@

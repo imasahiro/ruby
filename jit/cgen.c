@@ -35,6 +35,7 @@ static void gwjit_context_init()
     jit_host_context.cFixnum = rb_cFixnum;
     jit_host_context.cFloat = rb_cFloat;
     jit_host_context.cHash = rb_cHash;
+    jit_host_context.cMath = rb_cMath;
     jit_host_context.cRegexp = rb_cRegexp;
     jit_host_context.cTime = rb_cTime;
     jit_host_context.cString = rb_cString;

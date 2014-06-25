@@ -22,6 +22,7 @@ typedef struct gwjit_context {
     VALUE cFixnum;
     VALUE cFloat;
     VALUE cHash;
+    VALUE cMath;
     VALUE cRegexp;
     VALUE cString;
     VALUE cTime;

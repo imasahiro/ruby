@@ -41,10 +41,25 @@ DATA = [
   ["FloatLt", "opt_lt",  "<",  [:Float, :Float]],
   ["FloatLe", "opt_le",  "<=", [:Float, :Float]],
 
-  #["ObjectNot", "opt_not", "!",  [:_]],
+  ["ObjectNot", "opt_not", "!",  [:_]],
   #["ObjectNe",  "opt_neq", "!=", [:_, :_]],
   #["ObjectEq",  "opt_eq",  "==", [:_, :_]],
 
+  # converter
+  # * => Fixnum
+  #["FixnumToFixnum", "opt_send_simple", "to_i",   [:Fixnum]],
+  ["FloatToFixnum",  "opt_send_simple", "to_i",   [:Float]],
+  ["StringToFixnum", "opt_send_simple", "to_i",   [:String]],
+  # * => Float
+  ["FixnumToFloat", "opt_send_simple", "to_f",   [:Fixnum]],
+  ["FloatToFloat",  "opt_send_simple", "to_f",   [:Float]],
+  ["StringToFloat", "opt_send_simple", "to_f",   [:String]],
+  # * => String
+  ["FixnumToString", "opt_send_simple", "to_s",   [:Fixnum]],
+  ["FloatToString",  "opt_send_simple", "to_s",   [:Float]],
+  ["StringToString", "opt_send_simple", "to_s",   [:String]],
+
+  # math API
   ["MathSin",   "opt_send_simple", "sin",   [:Math, :_]],
   ["MathCos",   "opt_send_simple", "cos",   [:Math, :_]],
   ["MathTan",   "opt_send_simple", "tan",   [:Math, :_]],
@@ -204,6 +219,9 @@ class Unredefined < Rule
     return "JIT_BOP_INV"       if sym == '~'
     return "JIT_BOP_RSHIFT"    if sym == '>>'
 
+    return "JIT_BOP_TO_F"    if sym == 'to_f'
+    return "JIT_BOP_TO_I"    if sym == 'to_i'
+    return "JIT_BOP_TO_S"    if sym == 'to_s'
     # math
     return "JIT_BOP_SIN"       if sym == 'sin'
     return "JIT_BOP_COS"       if sym == 'cos'

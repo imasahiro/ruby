@@ -55,19 +55,19 @@ FloatGe  :def :use :trans (LHS:lir_t, RHS:lir_t)
 FloatLt  :def :use :trans (LHS:lir_t, RHS:lir_t)
 FloatLe  :def :use :trans (LHS:lir_t, RHS:lir_t)
 
-## # object operator
-## ObjectNot :def :use (Recv:lir_t)
+# object operator
+ObjectNot :def :use (Recv:lir_t)
 ## ObjectEq  :def :use (LHS:lir_t, RHS:lir_t)
 ## ObjectNe  :def :use (LHS:lir_t, RHS:lir_t)
 
 # Converter
 ObjectToString :def :use :trans (Val:lir_t)
-FixnumToFloat  :def :use (Val:lir_t)
-FixnumToString :def :use (Val:lir_t)
-FloatToFixnum  :def :use (Val:lir_t)
-FloatToString  :def :use (Val:lir_t)
-StringToFixnum :def :use (Val:lir_t)
-StringToFloat  :def :use (Val:lir_t)
+FixnumToFloat  :def :use :trans (Val:lir_t)
+FixnumToString :def :use :trans (Val:lir_t)
+FloatToFixnum  :def :use :trans (Val:lir_t)
+FloatToString  :def :use :trans (Val:lir_t)
+StringToFixnum :def :use :trans (Val:lir_t)
+StringToFloat  :def :use :trans (Val:lir_t)
 
 # Math API
 MathSin   :def :use :trans (Recv:lir_t)

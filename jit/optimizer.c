@@ -191,7 +191,7 @@ static lir_inst_t *remove_overflow_check(TraceRecorder *Rec, lir_inst_t *inst)
     return inst;
 }
 
-static lir_inst_t *fold_binop_tostr(TraceRecorder *Rec, lir_folder_t folder, lir_inst_t *inst)
+static lir_inst_t* fold_binop_cast(TraceRecorder* Rec, lir_folder_t folder, lir_inst_t* inst)
 {
     ILoadConstObject *Val = (ILoadConstObject *)*lir_inst_get_args(inst, 0);
     VALUE val = Qundef;
@@ -277,29 +277,30 @@ static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
 
     switch (lir_opcode(inst)) {
     case OPCODE_IObjectToString:
-        return fold_binop_tostr(Rec, folder, inst);
-    //case OPCODE_FixnumComplement :
-    //case OPCODE_FixnumToFloat :
-    //case OPCODE_FixnumToString :
-    //case OPCODE_FloatToFixnum :
-    //case OPCODE_FloatToString :
-    //case OPCODE_StringToFixnum :
-    //case OPCODE_StringToFloat :
-    //case OPCODE_MathSin :
-    //case OPCODE_MathCos :
-    //case OPCODE_MathTan :
-    //case OPCODE_MathExp :
-    //case OPCODE_MathSqrt :
-    //case OPCODE_MathLog10 :
-    //case OPCODE_MathLog2 :
-    //case OPCODE_StringLength :
-    //case OPCODE_StringEmptyP :
-    //case OPCODE_ArrayLength :
-    //case OPCODE_ArrayEmptyP :
-    //case OPCODE_ArrayGet :
-    //case OPCODE_HashLength :
-    //case OPCODE_HashEmptyP :
-    //case OPCODE_HashGet :
+        return fold_binop_cast(Rec, folder, inst);
+    //case OPCODE_IFixnumToFloat :
+    //case OPCODE_IFixnumToString :
+    //case OPCODE_IFloatToFixnum :
+    //case OPCODE_IFloatToString :
+    //case OPCODE_IStringToFixnum :
+    //case OPCODE_IStringToFloat :
+
+    //case OPCODE_IFixnumComplement :
+    //case OPCODE_IMathSin :
+    //case OPCODE_IMathCos :
+    //case OPCODE_IMathTan :
+    //case OPCODE_IMathExp :
+    //case OPCODE_IMathSqrt :
+    //case OPCODE_IMathLog10 :
+    //case OPCODE_IMathLog2 :
+    //case OPCODE_IStringLength :
+    //case OPCODE_IStringEmptyP :
+    //case OPCODE_IArrayLength :
+    //case OPCODE_IArrayEmptyP :
+    //case OPCODE_IArrayGet :
+    //case OPCODE_IHashLength :
+    //case OPCODE_IHashEmptyP :
+    //case OPCODE_IHashGet :
 
     case OPCODE_IFixnumAdd :
     case OPCODE_IFixnumSub :

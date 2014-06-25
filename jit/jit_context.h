@@ -118,6 +118,10 @@ enum JIT_BOP {
     JIT_BOP_INV,
     JIT_BOP_RSHIFT,
 
+    JIT_BOP_TO_F,
+    JIT_BOP_TO_I,
+    JIT_BOP_TO_S,
+
     JIT_BOP_SIN,
     JIT_BOP_COS,
     JIT_BOP_TAN,

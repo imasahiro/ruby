@@ -850,7 +850,8 @@ goruby.$(OBJEXT): {$(VPATH)}goruby.c {$(VPATH)}main.c $(RUBY_H_INCLUDES) \
   {$(VPATH)}vm_debug.h {$(VPATH)}node.h $(hdrdir)/ruby.h
 
 jit_cgen_cmd.h: $(srcdir)/jit/ruby_jit.h $(srcdir)/jit/jit_context_api.h \
-	$(srcdir)/jit/jit_context.h  $(srcdir)/jit/make_pch.rb
+	$(srcdir)/jit/jit_context.h  $(srcdir)/jit/make_pch.rb \
+	$(srcdir)/jit/gwir_template.h
 	$(Q) $(BASERUBY) $(srcdir)/jit/make_pch.rb . $(srcdir) $(CC) $(arch) > $@
 
 gwir.c: {$(VPATH)}jit/gwir.def {$(VPATH)}jit/gwir.rb \

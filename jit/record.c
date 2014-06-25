@@ -55,43 +55,6 @@ static int vm_load_cache(VALUE obj, ID id, IC ic, rb_call_info_t *ci,
 #define _TOPN(N) TopRegister(Rec, (int)(N))
 #define _SET(N, REG) SetRegister(Rec, (int)(N), REG)
 
-static lir_t EmitConverter(TraceRecorder *Rec, VALUE val, lir_t Rval,
-                           VALUE *reg_pc, int type)
-{
-    if (FIXNUM_P(val)) {
-        EmitIR(GuardTypeFixnum, reg_pc, Rval);
-        switch (type) {
-        case T_FIXNUM:
-            return Rval;
-        case T_FLOAT:
-            return EmitIR(FloatToFixnum, Rval);
-        case T_STRING:
-            return EmitIR(StringToFixnum, Rval);
-        }
-    } else if (FLONUM_P(val)) {
-        EmitIR(GuardTypeFlonum, reg_pc, Rval);
-        switch (type) {
-        case T_FIXNUM:
-            return EmitIR(FixnumToFloat, Rval);
-        case T_FLOAT:
-            return Rval;
-        case T_STRING:
-            return EmitIR(StringToFloat, Rval);
-        }
-    } else if (!SPECIAL_CONST_P(val) && RBASIC_CLASS(val) == rb_cString) {
-        EmitIR(GuardTypeString, reg_pc, Rval);
-        switch (type) {
-        case T_FIXNUM:
-            return EmitIR(FixnumToString, Rval);
-        case T_FLOAT:
-            return EmitIR(FloatToString, Rval);
-        case T_STRING:
-            return Rval;
-        }
-    }
-    return NULL;
-}
-
 static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
 {
     lir_t Rval = NULL;
@@ -145,20 +108,38 @@ static lir_t EmitSpecialInst_StringFreeze(TraceRecorder *Rec, CALL_INFO ci,
     return _POP();
 }
 
-//static lir_t EmitSpecialInst_ObjectNot(TraceRecorder *Rec, CALL_INFO ci,
-//                                        lir_t *regs)
-//{
-//    ci = CloneInlineCache(&Rec->CacheMng, ci);
-//    EmitIR(GuardMethodCache, Rec->CurrentEvent->pc, regs[0], ci);
-//    extern VALUE rb_obj_not(VALUE obj);
-//    if (check_cfunc(ci->me, rb_obj_not)) {
-//        return EmitIR(ObjectNot, regs[0]);
-//    }
-//    else {
-//        return EmitIR(InvokeMethod, ci, ci->argc + 1, regs);
-//    }
-//}
-//
+static lir_t EmitSpecialInst_FixnumToFixnum(TraceRecorder* Rec, CALL_INFO ci,
+                                            lir_t* regs)
+{
+    return regs[0];
+}
+
+static lir_t EmitSpecialInst_FloatToFloat(TraceRecorder* Rec, CALL_INFO ci,
+                                          lir_t* regs)
+{
+    return regs[0];
+}
+
+static lir_t EmitSpecialInst_StringToString(TraceRecorder* Rec, CALL_INFO ci,
+                                            lir_t* regs)
+{
+    return regs[0];
+}
+
+extern VALUE rb_obj_not(VALUE obj);
+
+static lir_t EmitSpecialInst_ObjectNot(TraceRecorder* Rec, CALL_INFO ci,
+                                       lir_t* regs)
+{
+    ci = CloneInlineCache(&Rec->CacheMng, ci);
+    EmitIR(GuardMethodCache, Rec->CurrentEvent->pc, regs[0], ci);
+    if (check_cfunc(ci->me, rb_obj_not)) {
+        return EmitIR(ObjectNot, regs[0]);
+    } else {
+        return EmitIR(InvokeMethod, ci, ci->argc + 1, regs);
+    }
+}
+
 //static lir_t EmitSpecialInst_ObjectNe(TraceRecorder *Rec, CALL_INFO ci,
 //                                        lir_t *regs)
 //{
@@ -209,8 +190,8 @@ static void EmitSpecialInst0(TraceRecorder *Rec, VALUE *pc, CALL_INFO ci,
                              int opcode, VALUE *params, lir_t *regs)
 {
     lir_t Rval = NULL;
+    vm_search_method(ci, params[0]);
     if ((Rval = EmitSpecialInst(Rec, pc, ci, opcode, params, regs)) == NULL) {
-        vm_search_method(ci, params[0]);
         ci = CloneInlineCache(&Rec->CacheMng, ci);
         EmitIR(GuardMethodCache, pc, regs[0], ci);
         Rval = EmitIR(InvokeMethod, ci, ci->argc + 1, regs);

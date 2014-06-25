@@ -30,7 +30,8 @@
 #include "jit_context.h"
 #include "gwir_template.h"
 
-VALUE rb_cMath = Qnil;
+static VALUE rb_cMath = Qnil;
+static ID id_to_f, id_to_i;
 
 typedef VALUE *VALUEPtr;
 typedef void *voidPtr;
@@ -80,8 +81,7 @@ struct lir_basic_block {
 
 typedef BasicBlock *BasicBlockPtr;
 
-short jit_vm_redefined_flag[JIT_BOP_EXT_LAST_ - BOP_LAST_];
-
+static short jit_vm_redefined_flag[JIT_BOP_EXT_LAST_ - BOP_LAST_];
 static st_table *jit_opt_method_table = 0;
 
 static int jit_redefinition_check_flag(VALUE klass)
@@ -130,6 +130,18 @@ static void rb_jit_init_redefined_flag(void)
     DEF(Fixnum, "^", JIT_BOP_XOR);
     DEF(Fixnum, ">>", JIT_BOP_RSHIFT);
     DEF(Fixnum, "~", JIT_BOP_INV);
+
+    DEF(Fixnum, "to_f", JIT_BOP_TO_F);
+    DEF(Float, "to_f", JIT_BOP_TO_F);
+    DEF(String, "to_f", JIT_BOP_TO_F);
+
+    DEF(Float, "to_i", JIT_BOP_TO_I);
+    DEF(String, "to_i", JIT_BOP_TO_I);
+
+    DEF(Fixnum, "to_s", JIT_BOP_TO_S);
+    DEF(Float, "to_s", JIT_BOP_TO_S);
+    DEF(String, "to_s", JIT_BOP_TO_S);
+
     DEF(Math, "sin", JIT_BOP_SIN);
     DEF(Math, "cos", JIT_BOP_COS);
     DEF(Math, "tan", JIT_BOP_TAN);
@@ -364,6 +376,8 @@ void rb_jit_global_init()
     global_rjit = RJitInit();
     rb_cMath = rb_singleton_class(rb_mMath);
     rb_jit_init_redefined_flag();
+    id_to_f = rb_intern("to_f");
+    id_to_i = rb_intern("to_i");
     Init_jit(); // load jit_prelude
 }
 

@@ -8,6 +8,17 @@ class Integer
     end
     self
   end
+
+  def upto(num, &block)
+    return to_enum(:upto, num) unless block_given?
+
+    i = self
+    while(i <= num)
+      yield i
+      i += 1
+    end
+    self
+  end
 end
 
 class Range

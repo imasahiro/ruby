@@ -175,13 +175,17 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
 
 static int cgen_freeze(CGen *gen, int id)
 {
+    int success = 0;
+#if GWJIT_DUMP_COMPILE_LOG > 0
+    uint64_t end;
+#endif
     if (gen->buf.size > 0) {
         buffer_setnull(&gen->buf);
         fputs(gen->buf.buf, gen->fp);
     }
     buffer_destory(&gen->buf);
 #if GWJIT_DUMP_COMPILE_LOG > 0
-    uint64_t end = getTimeMilliSecond();
+    end = getTimeMilliSecond();
     fprintf(stderr, "c-code generation time %llu\n", end - timer);
 #endif
 
@@ -199,7 +203,7 @@ static int cgen_freeze(CGen *gen, int id)
         fclose(gen->fp);
         gen->fp = popen(gen->cmd, "w");
     }
-    int success = pclose(gen->fp);
+    success = pclose(gen->fp);
 #if GWJIT_DUMP_COMPILE_LOG > 0
     fprintf(stderr, "native code generation time %llu\n",
             getTimeMilliSecond() - end);
@@ -469,6 +473,8 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
     char path[128] = {};
     char fname[128] = {};
     CGen gen;
+    hashmap_t SideExitBBs;
+    int success = -1;
     int id = serial_id++;
 
     assert(serial_id < 100 && "too many compiled trace");
@@ -481,11 +487,10 @@ static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
 
     cgen_open(&gen, FILE_MODE, path, id);
 
-    hashmap_t SideExitBBs;
     hashmap_init(&SideExitBBs, trace_sideexit_size(trace));
 
     Translate(Rec, &gen, &SideExitBBs, id);
-    int success = cgen_freeze(&gen, id);
+    success = cgen_freeze(&gen, id);
     if (success != 0) {
         trace->Code = (void *) 0xdeadbeaf;
     }
@@ -1406,6 +1411,6 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
         break;
     }
     default:
-        assert(false && "unreachable");
+        assert(0 && "unreachable");
     }
 }

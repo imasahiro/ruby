@@ -72,6 +72,7 @@ static void BasicBlockReplace(BasicBlock *bb, int idx1, int idx2)
 
 static lir_t AdjustStack(TraceRecorder *Rec)
 {
+    int jumpIdx;
     lir_t Reg;
     IStackAdjust *sa = (IStackAdjust *)Rec->EntryBlock->Insts[0];
     BasicBlock *PrevBB = Rec->Block;
@@ -87,7 +88,7 @@ static lir_t AdjustStack(TraceRecorder *Rec)
      * L3: Jump Block  | StackPop(2)
      * L4: StackPop(2) | Jump Block
      */
-    int jumpIdx = Rec->EntryBlock->size - 1;
+    jumpIdx = Rec->EntryBlock->size - 1;
     BasicBlockReplace(Rec->EntryBlock, jumpIdx - 1, jumpIdx);
     Rec->Block = PrevBB;
 #if 0
@@ -124,7 +125,7 @@ static void PushRegister(TraceRecorder *Rec, lir_t Reg)
         Rec->RegStack = RegStack + GWIR_RESERVED_REGSTACK_SIZE;
         Rec->RegStackCapacity = newsize;
     }
-    assert(Reg >= 0);
+    assert(Reg != NULL);
     Rec->RegStack[Rec->RegStackSize] = Reg;
     Rec->RegStackSize += 1;
     TraceRecorderRecordBottom(Rec, Rec->RegStackSize);
@@ -143,25 +144,26 @@ static lir_t PopRegister(TraceRecorder *Rec)
     Rec->RegStackSize -= 1;
     TraceRecorderRecordBottom(Rec, Rec->RegStackSize);
     Reg = Rec->RegStack[Rec->RegStackSize];
-    if (Reg <= 0) {
+    if (Reg == 0) {
         Reg = AdjustStack(Rec);
     }
 #if DUMP_STACK_MAP > 1
     fprintf(stderr, "pop : %d %ld\n", Rec->RegStackSize, Reg);
-    assert(Reg != 0);
+    assert(Reg != NULL);
 #endif
     return Reg;
 }
 
 static lir_t TopRegister(TraceRecorder *Rec, int n)
 {
+    lir_t Reg;
     int i, idx = Rec->RegStackSize - n - 1;
     assert(idx < Rec->RegStackSize && idx > -1 * GWIR_RESERVED_REGSTACK_SIZE);
-    lir_t Reg = Rec->RegStack[idx];
+    Reg = Rec->RegStack[idx];
     TraceRecorderRecordBottom(Rec, idx);
-    if (Reg == 0 && idx < 0) {
+    if (Reg == NULL && idx < 0) {
         for (i = idx; i < 0; i++) {
-            if (Rec->RegStack[i] == 0) {
+            if (Rec->RegStack[i] == NULL) {
                 Rec->RegStack[i] = AdjustStack(Rec);
             }
         }
@@ -170,7 +172,7 @@ static lir_t TopRegister(TraceRecorder *Rec, int n)
 #if DUMP_STACK_MAP > 1
     fprintf(stderr, "top : %d %ld\n", idx, Reg);
 #endif
-    assert(Reg != 0);
+    assert(Reg != NULL);
     return Reg;
 }
 

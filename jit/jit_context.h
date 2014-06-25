@@ -131,9 +131,9 @@ enum JIT_BOP {
 #define JIT_OP_UNREDEFINED_P(op, klass) \
     (LIKELY((jit_vm_redefined_flag[(op)-JIT_BOP_LAST_] & (klass)) == 0))
 
-#define OP_UNREDEFINED_P(op, klass)                       \
-    ((op < BOP_LAST_) ? BASIC_OP_UNREDEFINED_P(op, klass) \
-                      : JIT_OP_UNREDEFINED_P(op, klass))
+#define OP_UNREDEFINED_P(op, klass)                                     \
+    (((int)op < (int)JIT_BOP_LAST_) ? BASIC_OP_UNREDEFINED_P(op, klass) \
+                                    : JIT_OP_UNREDEFINED_P(op, klass))
 
 #ifdef GWJIT_HOST
 static VALUE make_no_method_exception(VALUE exc, const char *format, VALUE obj,

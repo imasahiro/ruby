@@ -96,6 +96,11 @@ def emit_ir(ir)
   ir.arg.each{|e|
     if e.variadic || e.type == "LirPtr"
       puts "  int i;"
+    end
+  }
+
+  ir.arg.each{|e|
+    if e.variadic || e.type == "LirPtr"
       puts "  for(i = 0; i < argc; i++) {"
       puts "    ir->#{e.name}[i] = #{e.name}[i];\n"
       puts "  }"
@@ -118,6 +123,13 @@ def dump_ir(ir)
   print "static void Dump_#{ir.name}(lir_inst_t *Inst)\n"
   puts "{\n"
   puts "  I#{ir.name} *ir = (I#{ir.name} *)Inst;\n"
+
+  ir.arg.each{|e|
+    if e.variadic || e.type == "LirPtr"
+      puts "  int i_#{e.name};"
+    end
+  }
+
   puts "  fprintf(stderr, \"  \" FMT_ID \" #{ir.name}\", lir_getid(&ir->base));"
 
   ir.arg.each{|e|
@@ -125,7 +137,6 @@ def dump_ir(ir)
     n = e.name
     puts "  fprintf(stderr, \" #{n}:\");\n"
     if e.variadic || e.type == "LirPtr"
-      puts "  int i_#{n};"
       puts "  for(i_#{n} = 0; i_#{n} < ir->argc; i_#{n}++) {"
       if e.type == "LirPtr"
         puts "    #{t} val = &ir->#{n}[i_#{n}];"

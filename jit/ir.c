@@ -309,6 +309,7 @@ static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_siz
 {
     int opt;
     BasicBlock *bb = Rec->Block;
+    lir_inst_t* buf;
     if (!RJitModeIs(Rec->jit, TRACE_MODE_RECORD)) {
         return NULL;
     }
@@ -326,7 +327,7 @@ static lir_inst_t *AddInst(TraceRecorder *Rec, lir_inst_t *inst, size_t inst_siz
         bb->capacity = newsize;
     }
 
-    lir_inst_t *buf = constant_fold_inst(Rec, inst);
+    buf = constant_fold_inst(Rec, inst);
     if (buf == inst) {
         inst->parent = bb;
         buf = CreateInst(Rec, inst, inst_size);

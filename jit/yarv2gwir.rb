@@ -260,7 +260,7 @@ class Type < Rule
     elsif @type == :_
       return ""
     else
-      s  = "Emit_GuardTypeSpecialConst(Rec, pc, #{p}) && "
+      s  = "Emit_GuardTypeSpecialConst(Rec, pc, #{p}); "
       s += "Emit_GuardType#{@type}(Rec, pc, #{p})"
       return s
     end
@@ -327,8 +327,14 @@ DATA.each { |op|
   end
 }
 
+# XXX we need to execute max_param_size.times twice in order to
+#     avoid compile error: ISO C90 forbids mixed declarations and code.
 max_param_size.times {|i|
-  puts "int is_flonum#{i} = 0; (void) is_flonum#{i};"
+  puts "int is_flonum#{i} = 0;"
+}
+
+max_param_size.times {|i|
+  puts "(void) is_flonum#{i};"
 }
 
 DATA.each.with_index { |op, i|

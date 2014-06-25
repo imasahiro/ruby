@@ -66,10 +66,12 @@ static inline VALUE rb_jit_exec_IFixnumDivOverflow(VALUE recv, VALUE obj)
 {
     long x = FIX2LONG(recv);
     long y = FIX2LONG(obj);
+    long div, mod;
     x = (x > 0)? x : -x;
     y = (y > 0)? y : -y;
-    long div = x / y;
-    long mod = x - div * y;
+    div = x / y;
+    mod = x - div * y;
+
     if ((mod < 0 && y > 0) || (mod > 0 && y < 0)) {
         mod += y;
         div -= 1;
@@ -80,10 +82,11 @@ static inline VALUE rb_jit_exec_IFixnumModOverflow(VALUE recv, VALUE obj)
 {
     long x = FIX2LONG(recv);
     long y = FIX2LONG(obj);
+    long div, mod;
     x = (x > 0)? x : -x;
     y = (y > 0)? y : -y;
-    long div = x / y;
-    long mod = x - div * y;
+    div = x / y;
+    mod = x - div * y;
     if ((mod < 0 && y > 0) || (mod > 0 && y < 0)) {
         mod += y;
         div -= 1;

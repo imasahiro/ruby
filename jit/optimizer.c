@@ -239,20 +239,21 @@ static lir_inst_t *fold_string_add(TraceRecorder *Rec, lir_folder_t folder, lir_
 static lir_inst_t *add_const_pool(TraceRecorder *Rec, lir_inst_t *inst)
 {
     VALUE val;
+    Trace* trace;
+    unsigned i;
     if (lir_opcode(inst) == OPCODE_ILoadConstNil) {
         val = Qnil;
     }
     else {
         val = ((ILoadConstObject *)inst)->Val;
     }
-    Trace *trace = Rec->jit->CurrentTrace;
-    unsigned i;
+    trace = Rec->jit->CurrentTrace;
     assert(Rec->jit->CurrentTrace->constpool_size == Rec->constpool_size);
     for (i = 0; i < trace->constpool_size; i++) {
         VALUE obj = trace->constpool[i];
         if (obj == val) {
             if (Rec->constpool[i] == NULL) {
-                asm volatile("int3");
+                rb_bug("unreachable");
             }
             return Rec->constpool[i];
         }
@@ -262,13 +263,14 @@ static lir_inst_t *add_const_pool(TraceRecorder *Rec, lir_inst_t *inst)
 
 static lir_inst_t *constant_fold_inst(TraceRecorder *Rec, lir_inst_t *inst)
 {
+    lir_folder_t folder;
     if (is_guard(inst) || is_terminator(inst)) {
         return inst;
     }
     if (is_constant(inst)) {
         return add_const_pool(Rec, inst);
     }
-    lir_folder_t folder = const_fold_funcs[lir_opcode(inst)];
+    folder = const_fold_funcs[lir_opcode(inst)];
     if (folder == NULL) {
         return inst;
     }
@@ -373,9 +375,9 @@ static int worklist_empty(worklist_t *list)
 
 static void worklist_init(worklist_t *list, BasicBlock *block, TraceRecorder *Rec)
 {
+    unsigned i;
     lir_list_init(Rec, &list->list);
     list->Rec = Rec;
-    unsigned i;
     while (block != NULL) {
         for (i = 0; i < block->size; i++) {
             lir_inst_t *Inst = block->Insts[i];
@@ -387,9 +389,9 @@ static void worklist_init(worklist_t *list, BasicBlock *block, TraceRecorder *Re
 
 static int apply_worklist(TraceRecorder *Rec, BasicBlock *block, worklist_func_t func)
 {
+    int modified = 0;
     worklist_t worklist;
     worklist_init(&worklist, block, Rec);
-    int modified = 0;
     while (!worklist_empty(&worklist)) {
         lir_inst_t *inst = worklist_pop(&worklist);
         modified += func(&worklist, inst);
@@ -399,6 +401,7 @@ static int apply_worklist(TraceRecorder *Rec, BasicBlock *block, worklist_func_t
 
 static int constant_fold(worklist_t *list, lir_inst_t *inst)
 {
+    unsigned i;
     lir_inst_t *newinst;
     TraceRecorder *Rec = list->Rec;
     BasicBlock *prevBB = Rec->Block;
@@ -407,7 +410,6 @@ static int constant_fold(worklist_t *list, lir_inst_t *inst)
     Rec->Block = prevBB;
     if (inst != newinst) {
         if (inst->user) {
-            unsigned i;
             for (i = 0; i < inst->user->size; i++) {
                 worklist_push(list, inst->user->list[i]);
             }

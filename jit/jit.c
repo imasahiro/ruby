@@ -707,9 +707,10 @@ static void TraceRecorderAppend(RJit *jit, TraceRecorder *Rec, Event *e)
 {
     Rec->CurrentEvent = e;
     if (Rec->EntryBlock == NULL) {
+        BasicBlock* bb;
         Rec->EntryBlock = Rec->Block = CreateBlock(Rec, NULL);
         Emit_StackAdjust(Rec, 0, NULL);
-        BasicBlock *bb = CreateBlock(Rec, e->pc);
+        bb = CreateBlock(Rec, e->pc);
         Emit_Jump(Rec, bb);
         Rec->Block = bb;
     }
@@ -734,8 +735,8 @@ static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)
     TraceRecorderClear(Rec, 0);
 }
 
-static void TraceRecorderAbort(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
-                               VALUE *reg_pc, TraceErrorStatus reason)
+static void TraceRecorderAbort(TraceRecorder* Rec, rb_control_frame_t* reg_cfp,
+                               VALUE* reg_pc, TraceErrorStatus reason)
 {
     if (reason != TRACE_OK) {
         const rb_iseq_t *iseq = GET_ISEQ();
@@ -808,12 +809,15 @@ static int AlreadyRecordedOnTrace(RJit *jit, Event *e)
 
 static int isTracableNativeCall(Event *e)
 {
+    rb_control_frame_t* reg_cfp;
+    CALL_INFO ci;
+
     if (e->opcode != BIN(opt_send_simple) || e->opcode != BIN(send)) {
         /* this instruction is not method call instruction */
         return 1;
     }
-    rb_control_frame_t *reg_cfp = e->cfp;
-    CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
+    reg_cfp = e->cfp;
+    ci = (CALL_INFO)GET_OPERAND(1);
     vm_search_method(ci, ci->recv = TOPN(ci->argc));
     if (ci->me) {
         switch (ci->me->def->type) {
@@ -841,9 +845,11 @@ static int isTracableNativeCall(Event *e)
     }
 
     /* check block_given? */
-    extern VALUE rb_f_block_given_p(void);
-    if (check_cfunc(ci->me, rb_f_block_given_p)) {
-        return 1;
+    {
+        extern VALUE rb_f_block_given_p(void);
+        if (check_cfunc(ci->me, rb_f_block_given_p)) {
+            return 1;
+        }
     }
 
     // I think this method is c-defined method.

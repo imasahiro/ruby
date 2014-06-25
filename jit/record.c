@@ -12,18 +12,18 @@
 static int vm_load_cache(VALUE obj, ID id, IC ic, rb_call_info_t *ci,
                          int is_attr)
 {
-    VALUE val = Qundef;
     if (RB_TYPE_P(obj, T_OBJECT)) {
         VALUE klass = RBASIC(obj)->klass;
         st_data_t index;
         long len = ROBJECT_NUMIV(obj);
-        VALUE *ptr = ROBJECT_IVPTR(obj);
         struct st_table *iv_index_tbl = ROBJECT_IV_INDEX_TBL(obj);
 
         if (iv_index_tbl) {
             if (st_lookup(iv_index_tbl, id, &index)) {
                 if ((long)index < len) {
-                    val = ptr[index];
+                    //VALUE val = Qundef;
+                    //VALUE *ptr = ROBJECT_IVPTR(obj);
+                    //val = ptr[index];
                 }
                 if (!is_attr) {
                     ic->ic_value.index = index;
@@ -97,8 +97,8 @@ static lir_t EmitLoadConst(TraceRecorder *Rec, VALUE val)
     lir_t Rval = NULL;
     BasicBlock *BB = Rec->EntryBlock;
     BasicBlock *prevBB = Rec->Block;
-    Rec->Block = BB;
     unsigned inst_size = BB->size;
+    Rec->Block = BB;
     if (NIL_P(val)) {
         Rval = EmitIR(LoadConstNil);
     } else if (val == Qtrue || val == Qfalse) {
@@ -232,10 +232,10 @@ static void PrepareInstructionArgument(TraceRecorder *Rec,
 static void EmitSpecialInst1(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                              VALUE *reg_pc, int opcode)
 {
-    TakeStackSnapshot(Rec, reg_pc);
     CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
     lir_t regs[ci->argc + 1];
     VALUE params[ci->argc + 1];
+    TakeStackSnapshot(Rec, reg_pc);
     PrepareInstructionArgument(Rec, reg_cfp, ci->argc, params, regs);
     EmitSpecialInst0(Rec, reg_pc, ci, opcode, params, regs);
 }
@@ -297,13 +297,13 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                            VALUE *reg_pc, CALL_INFO ci, rb_block_t *block,
                            lir_t Rblock, int opcode)
 {
+    int i;
+    lir_t Rval = NULL;
     lir_t regs[ci->argc + 1];
     VALUE params[ci->argc + 1];
 
     vm_search_method(ci, ci->recv = TOPN(ci->argc));
     ci = CloneInlineCache(&Rec->CacheMng, ci);
-
-    lir_t Rval = NULL;
 
     // user defined ruby method
     if (ci->me && ci->me->def->type == VM_METHOD_TYPE_ISEQ) {
@@ -327,16 +327,17 @@ static void EmitMethodCall(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
     }
 
     // check block_given?
-    extern VALUE rb_f_block_given_p(void);
-    if (check_cfunc(ci->me, rb_f_block_given_p)) {
-        lir_t Rrecv = EmitIR(LoadSelf);
-        EmitIR(GuardMethodCache, reg_pc, Rrecv, ci);
-        EmitIR(InvokeNative, rb_f_block_given_p, 0, NULL);
-        return;
+    {
+        extern VALUE rb_f_block_given_p(void);
+        if (check_cfunc(ci->me, rb_f_block_given_p)) {
+            lir_t Rrecv = EmitIR(LoadSelf);
+            EmitIR(GuardMethodCache, reg_pc, Rrecv, ci);
+            EmitIR(InvokeNative, rb_f_block_given_p, 0, NULL);
+            return;
+        }
     }
 
     // re-push registers
-    int i;
     for (i = 0; i < ci->argc + 1; i++) {
         _PUSH(regs[i]);
     }
@@ -707,9 +708,10 @@ static void record_reput(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_topn(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                         VALUE *reg_pc)
 {
+    lir_t Rval;
     rb_num_t n = (rb_num_t)GET_OPERAND(1);
     assert(0 && "need to test");
-    lir_t Rval = _TOPN(n);
+    Rval = _TOPN(n);
     _PUSH(Rval);
 }
 
@@ -818,12 +820,15 @@ static void record_invokesuper(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_invokeblock(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                                VALUE *reg_pc)
 {
+    const rb_block_t* block;
     CALL_INFO ci = (CALL_INFO)GET_OPERAND(1);
     int i, argc = 1 /*recv*/ + ci->orig_argc;
     lir_t Rblock, argv[argc];
+    VALUE type;
+
     TakeStackSnapshot(Rec, reg_pc);
 
-    const rb_block_t *block = rb_vm_control_frame_block_ptr(reg_cfp);
+    block = rb_vm_control_frame_block_ptr(reg_cfp);
     argv[0] = EmitIR(LoadSelf);
     Rblock = EmitIR(LoadBlock, block->iseq);
 
@@ -833,7 +838,7 @@ static void record_invokeblock(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 
     // fprintf(stderr, "cfp=%p, block=%p\n", reg_cfp, block);
     // asm volatile("int3");
-    VALUE type = GET_ISEQ()->local_iseq->type;
+    type = GET_ISEQ()->local_iseq->type;
 
     if ((type != ISEQ_TYPE_METHOD && type != ISEQ_TYPE_CLASS) || block == 0) {
         // "no block given (yield)"
@@ -872,6 +877,7 @@ static void record_invokeblock(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
                          VALUE *reg_pc)
 {
+    lir_t Val;
     if (VM_FRAME_TYPE_FINISH_P(reg_cfp)) {
         TraceRecorderAbort(Rec, reg_cfp, reg_pc, TRACE_ERROR_LEAVE);
         return;
@@ -881,7 +887,7 @@ static void record_leave(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
         return;
     }
     Rec->CallDepth -= 1;
-    lir_t Val = _POP();
+    Val = _POP();
     PopCallStack(Rec);
 
     EmitIR(FramePop);
@@ -1074,6 +1080,9 @@ static void record_opt_aset_with(TraceRecorder *Rec,
     VALUE recv, key, val;
     lir_t Robj, Rrecv, Rval;
     CALL_INFO ci;
+    VALUE params[3];
+    lir_t regs[3];
+
     TakeStackSnapshot(Rec, reg_pc);
     ci = (CALL_INFO)GET_OPERAND(1);
     key = (VALUE)GET_OPERAND(2);
@@ -1083,8 +1092,12 @@ static void record_opt_aset_with(TraceRecorder *Rec,
     Rrecv = _POP();
     Robj = EmitLoadConst(Rec, key);
 
-    VALUE params[] = { recv, key, val };
-    lir_t regs[] = { Rrecv, Robj, Rval };
+    params[0] = recv;
+    params[1] = key;
+    params[2] = val;
+    regs[0] = Rrecv;
+    regs[1] = Robj;
+    regs[2] = Rval;
     EmitSpecialInst0(Rec, reg_pc, ci, BIN(opt_aset_with), params, regs);
 }
 
@@ -1094,6 +1107,8 @@ static void record_opt_aref_with(TraceRecorder *Rec,
     VALUE recv, key;
     lir_t Robj, Rrecv;
     CALL_INFO ci;
+    VALUE params[2];
+    lir_t regs[2];
     TakeStackSnapshot(Rec, reg_pc);
     ci = (CALL_INFO)GET_OPERAND(1);
     key = (VALUE)GET_OPERAND(2);
@@ -1101,8 +1116,10 @@ static void record_opt_aref_with(TraceRecorder *Rec,
     Rrecv = _POP();
     Robj = EmitLoadConst(Rec, key);
 
-    VALUE params[] = { recv, key };
-    lir_t regs[] = { Rrecv, Robj };
+    params[0] = recv;
+    params[1] = key;
+    regs[0] = Rrecv;
+    regs[1] = Robj;
     EmitSpecialInst0(Rec, reg_pc, ci, BIN(opt_aref_with), params, regs);
 }
 
@@ -1139,35 +1156,49 @@ static void record_opt_not(TraceRecorder *Rec, rb_control_frame_t *reg_cfp,
 static void record_opt_regexpmatch1(TraceRecorder *Rec,
                                     rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-    TakeStackSnapshot(Rec, reg_pc);
-    VALUE obj = TOPN(0);
-    VALUE r = GET_OPERAND(1);
-    VALUE params[] = { obj, r };
-    lir_t RRe = EmitLoadConst(Rec, r);
-    lir_t Robj = _POP();
-    lir_t regs[] = { Robj, RRe };
+    VALUE params[2];
+    lir_t regs[2];
+    VALUE obj, r;
+    lir_t RRe, Robj;
     rb_call_info_t ci;
+
+    TakeStackSnapshot(Rec, reg_pc);
+    obj = TOPN(0);
+    r = GET_OPERAND(1);
+    RRe = EmitLoadConst(Rec, r);
+    Robj = _POP();
     ci.mid = idEqTilde;
     ci.flag = 0;
     ci.orig_argc = ci.argc = 1;
 
+    params[0] = obj;
+    params[1] = r;
+    regs[0] = Robj;
+    regs[1] = RRe;
     EmitSpecialInst0(Rec, reg_pc, &ci, BIN(opt_regexpmatch1), params, regs);
 }
 
 static void record_opt_regexpmatch2(TraceRecorder *Rec,
                                     rb_control_frame_t *reg_cfp, VALUE *reg_pc)
 {
-    TakeStackSnapshot(Rec, reg_pc);
-    VALUE obj2 = TOPN(1);
-    VALUE obj1 = TOPN(0);
-    lir_t Robj1 = _POP();
-    lir_t Robj2 = _POP();
-    VALUE params[] = { obj2, obj1 };
-    lir_t regs[] = { Robj2, Robj1 };
+    VALUE params[2];
+    lir_t regs[2];
+    VALUE obj1, obj2;
+    lir_t Robj1, Robj2;
     rb_call_info_t ci;
+
+    TakeStackSnapshot(Rec, reg_pc);
+    obj2 = TOPN(1);
+    obj1 = TOPN(0);
+    Robj1 = _POP();
+    Robj2 = _POP();
     ci.mid = idEqTilde;
     ci.flag = 0;
     ci.orig_argc = ci.argc = 1;
+    params[0] = obj2;
+    params[1] = obj1;
+    regs[0] = Robj2;
+    regs[1] = Robj1;
     EmitSpecialInst0(Rec, reg_pc, &ci, BIN(opt_regexpmatch2), params, regs);
 }
 

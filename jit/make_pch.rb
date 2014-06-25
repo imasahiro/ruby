@@ -46,9 +46,14 @@ cmd = "#{cc} -pipe -O#{opt} -g#{debug} -x c-header #{header_paths} \
 path = File.join(target_path, 'ruby_jit.h.pch')
 
 print "static const char cmd_template[] = "
-print "\"#{cc} -pipe -O#{opt} -g#{debug} -x c #{header_paths}"
+print "\"#{cc} -pipe -fPIC -O#{opt} -g#{debug} -x c #{header_paths}"
 print " -I#{source_path}/jit/"
 if cc == "clang"
   print " -include-pch #{path}"
 end
-print " -dynamiclib -Wall -o %s %s\";";
+if arch.include?("darwin")
+  print " -dynamiclib"
+else
+  print " -shared"
+end
+print " -Wall -o %s %s\";";

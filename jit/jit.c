@@ -8,6 +8,7 @@
 
  **********************************************************************/
 
+#include <sys/time.h> // gettimeofday
 #include "ruby/ruby.h"
 #include "ruby/vm.h"
 #include "ruby/st.h"
@@ -80,6 +81,22 @@ struct lir_basic_block {
 };
 
 typedef BasicBlock *BasicBlockPtr;
+
+#define JIT_PROFILE_ENTER(msg) jit_profile((msg), 0)
+#define JIT_PROFILE_LEAVE(msg, cond) jit_profile((msg), (cond))
+
+static void jit_profile(const char* msg, int print_log)
+{
+    static uint64_t last = 0;
+    uint64_t time;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    time = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+    if (print_log) {
+        fprintf(stderr, "%s : %" PRI_LL_PREFIX "u msec\n", msg, (time - last));
+    }
+    last = time;
+}
 
 static short jit_vm_redefined_flag[JIT_BOP_EXT_LAST_ - BOP_LAST_];
 static st_table *jit_opt_method_table = 0;
@@ -773,6 +790,7 @@ static void TraceRecorderAbort(TraceRecorder* Rec, rb_control_frame_t* reg_cfp,
 static VALUE *Invoke(RJit *jit, rb_thread_t *th, Trace *trace, Event *e)
 {
     VALUE *exit_pc = NULL;
+    //JIT_PROFILE_ENTER("invoke trace");
     TraceExitStatus exit_status;
     exit_status = trace->Code(th, e->cfp, e->pc, &exit_pc);
 #if GWIT_LOG_SIDE_EXIT > 0
@@ -791,6 +809,7 @@ static VALUE *Invoke(RJit *jit, rb_thread_t *th, Trace *trace, Event *e)
         assert(0 && "unreachable");
         break;
     }
+    //JIT_PROFILE_LEAVE("invoke trace", 0);
     return exit_pc;
 }
 

@@ -8,8 +8,6 @@
 
  **********************************************************************/
 
-#include <sys/time.h> // gettimeofday
-
 #include <limits.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -124,15 +122,6 @@ static int buffer_printf(Buffer *buf, const char *fmt, va_list ap)
     }
 }
 
-static uint64_t timer = 0;
-
-static uint64_t getTimeMilliSecond(void)
-{
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return tv.tv_sec * 1000 + tv.tv_usec / 1000;
-}
-
 // cgen
 enum cgen_mode {
     PROCESS_MODE, // generate native code directly
@@ -162,7 +151,7 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
     buffer_init(&gen->buf);
     gen->mode = mode;
     gen->hdr = NULL;
-    timer = getTimeMilliSecond();
+    JIT_PROFILE_ENTER("c-code generation");
     if (gen->mode == PROCESS_MODE) {
         cgen_setup_command(gen, path, "-");
         gen->fp = popen(gen->cmd, "w");
@@ -177,19 +166,13 @@ static void cgen_open(CGen *gen, enum cgen_mode mode, const char *path, int id)
 static int cgen_freeze(CGen *gen, int id)
 {
     int success = 0;
-#if GWJIT_DUMP_COMPILE_LOG > 0
-    uint64_t end;
-#endif
     if (gen->buf.size > 0) {
         buffer_setnull(&gen->buf);
         fputs(gen->buf.buf, gen->fp);
     }
     buffer_destory(&gen->buf);
-#if GWJIT_DUMP_COMPILE_LOG > 0
-    end = getTimeMilliSecond();
-    fprintf(stderr, "c-code generation time %llu\n", end - timer);
-#endif
-
+    JIT_PROFILE_LEAVE("c-code generation", GWJIT_DUMP_COMPILE_LOG > 0);
+    JIT_PROFILE_ENTER("nativecode generation");
     if (gen->mode == FILE_MODE) {
         char fpath[512] = {};
         snprintf(fpath, 512, "/tmp/gwjit.%d.%d.c", getpid(), id);
@@ -205,10 +188,7 @@ static int cgen_freeze(CGen *gen, int id)
         gen->fp = popen(gen->cmd, "w");
     }
     success = pclose(gen->fp);
-#if GWJIT_DUMP_COMPILE_LOG > 0
-    fprintf(stderr, "native code generation time %llu\n",
-            getTimeMilliSecond() - end);
-#endif
+    JIT_PROFILE_LEAVE("nativecode generation", GWJIT_DUMP_COMPILE_LOG > 0);
     if (gen->cmd_len > 0) {
         gen->cmd_len = 0;
         free(gen->cmd);

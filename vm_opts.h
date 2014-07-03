@@ -37,7 +37,11 @@
 
 /* VM running option */
 #define OPT_CHECKED_RUN              1
+#if defined(HTM_GVL) && ! defined(ADAPTIVE_INLINE_METHOD_CACHE)
+#define OPT_INLINE_METHOD_CACHE      0
+#else
 #define OPT_INLINE_METHOD_CACHE      1
+#endif
 #define OPT_GLOBAL_METHOD_CACHE      1
 #define OPT_BLOCKINLINING            0
 

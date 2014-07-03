@@ -1090,7 +1090,11 @@ leave
 	}
     }
 
+#ifdef HTM_GVL
+    RUBY_VM_CHECK_INTS_EXEC_CORE(th, &GET_OPERAND(-1));
+#else
     RUBY_VM_CHECK_INTS(th);
+#endif
 
     if (UNLIKELY(VM_FRAME_TYPE_FINISH_P(GET_CFP()))) {
 	vm_pop_frame(th);
@@ -1123,7 +1127,11 @@ throw
 (VALUE throwobj)
 (VALUE val)
 {
+#ifdef HTM_GVL
+    RUBY_VM_CHECK_INTS_EXEC_CORE(th, &GET_OPERAND(-2));
+#else
     RUBY_VM_CHECK_INTS(th);
+#endif
     val = vm_throw(th, GET_CFP(), throw_state, throwobj);
     THROW_EXCEPTION(val);
     /* unreachable */
@@ -1144,7 +1152,11 @@ jump
 ()
 ()
 {
+#ifdef HTM_GVL
+    RUBY_VM_CHECK_INTS_EXEC_CORE(th, &GET_OPERAND(-2));
+#else
     RUBY_VM_CHECK_INTS(th);
+#endif
     JUMP(dst);
 }
 
@@ -1160,7 +1172,11 @@ branchif
 ()
 {
     if (RTEST(val)) {
+#ifdef HTM_GVL
+	RUBY_VM_CHECK_INTS_EXEC_CORE(th, &GET_OPERAND(-2));
+#else
 	RUBY_VM_CHECK_INTS(th);
+#endif
 	JUMP(dst);
     }
 }
@@ -1177,7 +1193,11 @@ branchunless
 ()
 {
     if (!RTEST(val)) {
+#ifdef HTM_GVL
+	RUBY_VM_CHECK_INTS_EXEC_CORE(th, &GET_OPERAND(-2));
+#else
 	RUBY_VM_CHECK_INTS(th);
+#endif
 	JUMP(dst);
     }
 }
@@ -1255,7 +1275,11 @@ once
 	}
 	else {
 	    /* waiting for finish */
+#ifdef HTM_GVL
+	    RUBY_VM_CHECK_INTS_EXEC_CORE(th, &GET_OPERAND(-3));
+#else
 	    RUBY_VM_CHECK_INTS(th);
+#endif
 	    rb_thread_schedule();
 	    goto retry;
 	}

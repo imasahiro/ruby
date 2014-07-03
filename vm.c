@@ -1824,6 +1824,103 @@ ruby_vm_destruct(rb_vm_t *vm)
 	rb_vm_living_threads_init(vm);
 	ruby_vm_run_at_exit_hooks(vm);
 	rb_vm_gvl_destroy(vm);
+
+#ifdef HTM_GVL
+	if (getenv("RUBY_PRINT_HTM_INSN_STATS") ||
+	    getenv("RH_ISTATS")) {
+	    extern void iseq_print_counter(int64_t *counter, const char *insn_name, rb_iseq_t *iseq, int pos);
+
+	    extern void iseq_get_insn_counters(int64_t *counter_addr, uint32_t *counter0, uint32_t *counter1, uint32_t *counter2);
+	    extern int64_t htm_counter_for_null;
+	    uint32_t counter0, counter1, counter2;
+	    iseq_print_counter(&htm_counter_for_null, "null", NULL, -1);
+	    iseq_get_insn_counters(&htm_counter_for_null, &counter0, &counter1, &counter2);
+	    fprintf(stderr, "#HTM_INSN_STATS ISEQ %p %" PRIu32 " %" PRIu32 " counter_for_null\n",
+		    NULL,
+		    counter1, counter2);
+	}
+	if (getenv("RUBY_PRINT_HTM_STATS") ||
+	    getenv("RH_STATS")) {
+#if defined(__370__)
+	    int i;
+	    const char *reason_string[] = {
+		"TDB_not_set",
+		"Restart_interruption",
+		"External_interruption",
+		NULL,
+		"Program_interruption",
+		"Machine-check_interruption",
+		"I/O_interruption",
+		"Fetch_overflow",
+		"Store_overflow",
+		"Fetch_conflict",
+		"Store_conflict",
+		"Restricted_instruction",
+		"Program-interruption_condition",
+		"Nesting_depth_exceeded",
+		"Cache_fetch-related",
+		"Cache_store-related",
+		"Cache_other",
+		"Undetermined_condition",
+		"TABORT_instruction"
+	    };
+#endif
+
+#ifdef HTM_GVL_SUMMARY_STATS
+	    fprintf(stderr, "#HTM_STATS %15llu           tx_enter\n", vm->htm_stats.tx_enter);
+	    fprintf(stderr, "#HTM_STATS %15llu           tx\n", vm->htm_stats.tx);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  gvl_wait_before_tx_spin\n", vm->htm_stats.gvl_wait_before_tx_spin, 100 * vm->htm_stats.gvl_wait_before_tx_spin / (double)vm->htm_stats.tx_enter);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  gvl_wait_before_tx_sleep\n", vm->htm_stats.gvl_wait_before_tx_sleep, 100 * vm->htm_stats.gvl_wait_before_tx_sleep / (double)vm->htm_stats.tx_enter);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  abort\n", vm->htm_stats.abort, 100 * vm->htm_stats.abort / (double)vm->htm_stats.tx);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  first_abort\n", vm->htm_stats.first_abort, 100 * vm->htm_stats.first_abort / (double)vm->htm_stats.tx_enter);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  gvl_wait_and_retry_spin\n", vm->htm_stats.gvl_wait_and_retry_spin, 100 * vm->htm_stats.gvl_wait_and_retry_spin / (double)vm->htm_stats.abort);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  gvl_wait_and_retry_sleep\n", vm->htm_stats.gvl_wait_and_retry_sleep, 100 * vm->htm_stats.gvl_wait_and_retry_sleep / (double)vm->htm_stats.abort);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  gvl_acquired\n", vm->htm_stats.gvl_acquired, 100 * vm->htm_stats.gvl_acquired / (double)vm->htm_stats.abort);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  persistent_abort_retry\n", vm->htm_stats.persistent_abort_retry, 100 * vm->htm_stats.persistent_abort_retry / (double)vm->htm_stats.abort);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  persistent_abort_gvl_acquired\n", vm->htm_stats.gvl_persistent_abort, 100 * vm->htm_stats.gvl_persistent_abort / (double)vm->htm_stats.abort);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  transient_abort_retry\n", vm->htm_stats.transient_abort_retry, 100 * vm->htm_stats.transient_abort_retry / (double)vm->htm_stats.abort);
+	    fprintf(stderr, "#HTM_STATS %15llu %6.2f %%  transient_abort_gvl_acquired\n", vm->htm_stats.gvl_transient_abort, 100 * vm->htm_stats.gvl_transient_abort / (double)vm->htm_stats.abort);
+
+#if defined(__370__)
+	    for (i = 0; i < 19; i++) {
+		if (reason_string[i]) {
+		    unsigned long long total = vm->htm_stats.abort_reason_code[i][0] + vm->htm_stats.abort_reason_code[i][1] + vm->htm_stats.abort_reason_code[i][2];
+		    fprintf(stderr, "#HTM_STATS %15llu %s\n", total, reason_string[i]);
+		}
+	    }
+#elif defined(__x86_64__)
+#define HTM_IA32_STAT(nam) fprintf(stderr, "#HTM_STATS %15llu " #nam "\n", vm->htm_stats.abort_reason_counters.nam );
+#include "htm_ia32_stat.h"
+#undef HTM_IA32_STAT
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define HTM_PPC_STAT(nam) fprintf(stderr, "#HTM_STATS %15llu " #nam "\n", vm->htm_stats.abort_reason_counters.nam );
+#include "htm_ppc_stat.h"
+#undef HTM_PPC_STAT
+#else
+#error
+#endif
+#endif /* HTM_GVL_SUMMARY_STATS */
+#ifdef HTM_GVL_CYCLE_STATS
+	    {
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec tx\n", (vm->cycle_stats.tx >> 12) / 1000);
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec abort\n", (vm->cycle_stats.abort >> 12) / 1000);
+#ifdef HTM_GVL_DEFER_GC
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec deferred_gc\n", (vm->cycle_stats.deferred_gc >> 12) / 1000);
+#endif
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec gvl_wait_spin\n", (vm->cycle_stats.gvl_wait_spin >> 12) / 1000);
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec gvl_wait_sleep\n", (vm->cycle_stats.gvl_wait_sleep >> 12) / 1000);
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec gvl\n", (vm->cycle_stats.gvl >> 12) / 1000);
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec between_tx\n", (vm->cycle_stats.between_tx >> 12) / 1000);
+#ifdef HTM_GVL_EAGER_TLH_FILLING
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec eager_gc\n", (vm->cycle_stats.eager_gc >> 12) / 1000);
+#endif
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec mutex_sleep\n", (vm->cycle_stats.mutex_sleep >> 12) / 1000);
+		fprintf(stderr, "#HTM_CYCLE_STATS %20llu msec native_sleep\n", (vm->cycle_stats.native_sleep >> 12) / 1000);
+	    }
+#endif
+	}
+#endif /* HTM_GVL */
+
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
 	if (objspace) {
 	    rb_objspace_free(objspace);
@@ -2077,6 +2174,24 @@ rb_thread_mark(void *ptr)
 	rb_mark_tbl(th->local_storage);
 
 	if (GET_THREAD() != th && th->machine.stack_start && th->machine.stack_end) {
+#ifdef HTM_GVL
+	    if (! th->vm->use_gvl) {
+		while (! th->gc_safe_point_reached)
+		    ;
+		/* Load-to-load barrier */
+#if defined(__370__)
+		/* Nothing to do */
+#elif defined(__PPC__) && defined(__IBMC__)
+		__lwsync();
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+		asm volatile("lwsync" : : );
+#elif defined(__GNUC__) || defined(__IBMC__)
+		__sync_synchronize();
+#else
+#error
+#endif
+	    }
+#endif
 	    rb_gc_mark_machine_stack(th);
 	    rb_gc_mark_locations((VALUE *)&th->machine.regs,
 				 (VALUE *)(&th->machine.regs) +
@@ -2841,16 +2956,53 @@ rb_vm_set_progname(VALUE filename)
 struct rb_objspace *rb_objspace_alloc(void);
 #endif
 
+#ifdef HTM_GVL
+int rb_htm_schedule_interval;
+uint32_t rb_htm_tx_size_recalc_threshold;
+int rb_htm_persistent_retry_max;
+int rb_htm_transient_retry_max;
+int rb_htm_gvl_retry_max;
+#endif
+#if defined(USE_SIMPLE_GVL_2)
+int rb_gvl_spin_max;
+#endif
+
 void
 Init_BareVM(void)
 {
     /* VM bootstrap: phase 1 */
     rb_vm_t * vm = ruby_mimmalloc(sizeof(*vm));
+
+#if defined(ALIGN_RB_THREAD_T)
+#if defined(__370__)
+    rb_thread_t *th = malloc(sizeof(*th) + 256 * 2);
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+    rb_thread_t *th = malloc(sizeof(*th) + 64 * 2);
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+    rb_thread_t *th = malloc(sizeof(*th) + 128 * 2);
+#else
+#error
+#endif
+    void *th_before_aligned = th;
+#else
     rb_thread_t * th = ruby_mimmalloc(sizeof(*th));
+#endif
     if (!vm || !th) {
 	fprintf(stderr, "[FATAL] failed to allocate memory\n");
 	exit(EXIT_FAILURE);
     }
+
+#if defined(ALIGN_RB_THREAD_T)
+#if defined(__370__)
+    th = (rb_thread_t *)(((uintptr_t)th + 255) & ~255);
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+    th = (rb_thread_t *)(((uintptr_t)th + 63) & ~63);
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+    th = (rb_thread_t *)(((uintptr_t)th + 127) & ~127);
+#else
+#error
+#endif
+#endif
     MEMZERO(th, rb_thread_t, 1);
     rb_thread_set_current_raw(th);
 
@@ -2859,11 +3011,97 @@ Init_BareVM(void)
     vm->objspace = rb_objspace_alloc();
 #endif
     ruby_current_vm = vm;
-
+#if defined(ALIGN_RB_THREAD_T)
+    vm->main_thread_before_aligned = th_before_aligned;
+#endif
     Init_native_thread();
     th->vm = vm;
     th_init(th, 0);
     ruby_thread_init_stack(th);
+#ifdef HTM_GVL
+    {
+	char *sched_interval;
+	char *tx_size_recalc_threshold;
+	char *persistent_retry_max;
+	char *transient_retry_max;
+	char *gvl_retry_max;
+	double recalc_threshold_percent;
+
+	sched_interval = getenv("RUBY_HTM_SCHED_INTERVAL");
+	if (! sched_interval)
+	    sched_interval = getenv("RH_INTV");
+	if (sched_interval) {
+	    rb_htm_schedule_interval = atoi(sched_interval);
+	    if (rb_htm_schedule_interval == 0)
+		rb_htm_schedule_interval = 1;
+	    else if (rb_htm_schedule_interval <= -256)
+		rb_htm_schedule_interval = -255;
+	    fprintf(stderr, "<RUBY_VM: RUBY_HTM_SCHED_INTERVAL set to %d>\n", rb_htm_schedule_interval);
+	} else {
+	    rb_htm_schedule_interval = -255;
+	}
+
+	tx_size_recalc_threshold = getenv("RUBY_HTM_TX_SIZE_RECALC_THRESHOLD");
+	if (! tx_size_recalc_threshold)
+	    tx_size_recalc_threshold = getenv("RH_RECALC");
+	if (tx_size_recalc_threshold) {
+	    recalc_threshold_percent = atof(tx_size_recalc_threshold);
+	    if (recalc_threshold_percent < 0.0 || 100.0 < recalc_threshold_percent) {
+		recalc_threshold_percent = 6.0;
+	    }
+	    fprintf(stderr, "<RUBY_VM: RUBY_HTM_TX_SIZE_RECALC_THRESHOLD set to %f>\n", recalc_threshold_percent);
+	} else {
+	    recalc_threshold_percent = 6.0;
+	}
+	rb_htm_tx_size_recalc_threshold = (int)(recalc_threshold_percent * HTM_WAIT_AND_SEE_PERIOD / 100);
+	if (rb_htm_tx_size_recalc_threshold <= 0)
+	    rb_htm_tx_size_recalc_threshold = 1;
+
+	persistent_retry_max = getenv("RUBY_HTM_PERSISTENT_RETRY_MAX");
+	if (! persistent_retry_max)
+	    persistent_retry_max = getenv("RH_PRETRY");
+	if (persistent_retry_max) {
+	    rb_htm_persistent_retry_max = atoi(persistent_retry_max);
+	    fprintf(stderr, "<RUBY_VM: RUBY_HTM_PERSISTENT_RETRY_MAX set to %d>\n", rb_htm_persistent_retry_max);
+	} else {
+	    rb_htm_persistent_retry_max = 3;
+	}
+
+	transient_retry_max = getenv("RUBY_HTM_TRANSIENT_RETRY_MAX");
+	if (! transient_retry_max)
+	    transient_retry_max = getenv("RH_TRETRY");
+	if (transient_retry_max) {
+	    rb_htm_transient_retry_max = atoi(transient_retry_max);
+	    fprintf(stderr, "<RUBY_VM: RUBY_HTM_TRANSIENT_RETRY_MAX set to %d>\n", rb_htm_transient_retry_max);
+	} else {
+	    rb_htm_transient_retry_max = 3;
+	}
+
+	gvl_retry_max = getenv("RUBY_HTM_GVL_RETRY_MAX");
+	if (! gvl_retry_max)
+	    gvl_retry_max = getenv("RH_GRETRY");
+	if (gvl_retry_max) {
+	    rb_htm_gvl_retry_max = atoi(gvl_retry_max);
+	    fprintf(stderr, "<RUBY_VM: RUBY_HTM_GVL_RETRY_MAX set to %d>\n", rb_htm_gvl_retry_max);
+	} else {
+	    rb_htm_gvl_retry_max = 16;
+	}
+    }
+#endif /* HTM_GVL */
+#if defined(USE_SIMPLE_GVL_2)
+    {
+	char *gvl_spin_max;
+	gvl_spin_max = getenv("RUBY_GVL_SPIN_MAX");
+	if (! gvl_spin_max)
+	    gvl_spin_max = getenv("RB_GSPIN");
+	if (gvl_spin_max) {
+	    rb_gvl_spin_max = atoi(gvl_spin_max);
+	    fprintf(stderr, "<RUBY_VM: RUBY_GVL_SPIN_MAX set to %d>\n", rb_gvl_spin_max);
+	} else {
+	    rb_gvl_spin_max = 100000000;
+	}
+    }
+#endif
 }
 
 void
@@ -2933,10 +3171,21 @@ rb_ruby_debug_ptr(void)
     return ruby_vm_debug_ptr(GET_VM());
 }
 
+int *
+rb_ruby_use_gvl_ptr(void)
+{
+#if RUBY_VM_THREAD_MODEL == 3
+    return ruby_vm_use_gvl_ptr(GET_VM());
+#else
+    assert(0);
+    return NULL;
+#endif
+}
+
 /* iseq.c */
 VALUE rb_insn_operand_intern(rb_iseq_t *iseq,
-			     VALUE insn, int op_no, VALUE op,
-			     int len, size_t pos, VALUE *pnop, VALUE child);
+	                          VALUE insn, int op_no, VALUE op,
+	                          int len, size_t pos, VALUE *pnop, VALUE child);
 
 #if VM_COLLECT_USAGE_DETAILS
 

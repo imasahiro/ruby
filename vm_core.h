@@ -50,7 +50,7 @@
 
 /*#define HTM_GVL_CYCLE_STATS*/
 
-#define USE_SIMPLE_GVL_2
+#define USE_SIMPLE_GVL_2 1
 
 /* Enabled only for HTM */
 #define USE_TABLE_FOR_IC_IVAR
@@ -183,6 +183,15 @@ typedef struct rb_call_info_struct {
     rb_serial_t method_state;
     rb_serial_t class_serial;
     VALUE klass;
+#ifdef USE_TABLE_FOR_IC_IVAR
+    union {
+        struct st_table *ic_tbl;
+        VALUE ic_class;
+    } ic_guard;
+#else
+    // FIXME
+    // VALUE ic_class;
+#endif
 
     /* inline cache: values */
     const rb_method_entry_t *me;
@@ -362,6 +371,60 @@ struct rb_objspace;
 void rb_objspace_free(struct rb_objspace *);
 #endif
 
+#ifdef HTM_GVL
+typedef struct rb_htm_stats_struct {
+    unsigned long long tx;
+    unsigned long long tx_enter;
+    unsigned long long abort;
+    unsigned long long first_abort;
+    unsigned long long gvl_wait_before_tx_spin;
+    unsigned long long gvl_wait_before_tx_sleep;
+    unsigned long long gvl_wait_and_retry_spin;
+    unsigned long long gvl_wait_and_retry_sleep;
+    unsigned long long gvl_acquired;
+    unsigned long long persistent_abort_retry;
+    unsigned long long gvl_persistent_abort;
+    unsigned long long transient_abort_retry;
+    unsigned long long gvl_transient_abort;
+#if defined(__370__)
+    unsigned long long abort_reason_code[19][3];
+#elif defined(__x86_64__)
+#define HTM_IA32_STAT(nam) unsigned long long nam;
+    struct {
+#include "htm_ia32_stat.h"
+    } abort_reason_counters;
+#undef HTM_IA32_STAT
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define HTM_PPC_STAT(NAM) unsigned long long NAM;
+    struct {
+#include "htm_ppc_stat.h"
+    } abort_reason_counters;
+#undef HTM_PPC_STAT
+#else
+#error
+#endif
+} rb_htm_stats_t;
+
+typedef struct rb_htm_cycle_stats_struct {
+    unsigned long long tx;
+    unsigned long long abort;
+    unsigned long long gvl_wait_spin;
+    unsigned long long gvl_wait_sleep;
+    unsigned long long gvl;
+    unsigned long long between_tx;
+    unsigned long long mutex_sleep;
+    unsigned long long native_sleep;
+} rb_htm_cycle_stats_t;
+
+extern int rb_htm_schedule_interval;
+extern uint64_t rb_htm_count_reason_code;
+extern int use_non_tx_store;
+extern uint32_t rb_htm_tx_size_recalc_threshold;
+extern int rb_htm_persistent_retry_max;
+extern int rb_htm_transient_retry_max;
+extern int rb_htm_gvl_retry_max;
+#endif /* HTM_GVL */
+
 typedef struct rb_hook_list_struct {
     struct rb_event_hook_struct *hooks;
     rb_event_flag_t events;
@@ -375,6 +438,9 @@ typedef struct rb_vm_struct {
     rb_nativethread_lock_t    thread_destruct_lock;
 
     struct rb_thread_struct *main_thread;
+#if defined(ALIGN_RB_THREAD_T)
+    void *main_thread_before_aligned;
+#endif
     struct rb_thread_struct *running_thread;
 
     struct list_head living_threads;
@@ -436,6 +502,16 @@ typedef struct rb_vm_struct {
      * objects so do *NOT* mark this when you GC.
      */
     struct RArray at_exit;
+
+#if RUBY_VM_THREAD_MODEL == 3
+    int use_gvl;
+#endif
+#if defined(HTM_GVL) && defined(HTM_GVL_SUMMARY_STATS)
+    rb_htm_stats_t htm_stats;
+#endif
+#if defined(HTM_GVL) && defined(HTM_GVL_CYCLE_STATS)
+    rb_htm_cycle_stats_t cycle_stats;
+#endif
 
     VALUE *defined_strings;
 
@@ -1083,6 +1159,103 @@ void rb_threadptr_unlock_all_locking_mutexes(rb_thread_t *th);
 void rb_threadptr_pending_interrupt_clear(rb_thread_t *th);
 void rb_threadptr_pending_interrupt_enque(rb_thread_t *th, VALUE v);
 int rb_threadptr_pending_interrupt_active_p(rb_thread_t *th);
+
+#if defined(HTM_GVL) && defined(HTM_GVL_CYCLE_STATS)
+#if 0
+#define HTM_GVL_DEBUG_CYCLES_1(trgt)						\
+	if (cycle - th->saved_cycle > 0x1000 * 1000)			\
+	    fprintf(stderr, "charge %llu " #trgt " %s %d\n", (cycle - th->saved_cycle) >> 12, __FILE__, __LINE__);
+#else
+#define HTM_GVL_DEBUG_CYCLES_1(trgt)
+#endif
+#if 0
+#define HTM_GVL_DEBUG_CYCLES_2()       \
+    th->saved_file = __FILE__; \
+    th->saved_line = __LINE__;
+#else
+#define HTM_GVL_DEBUG_CYCLES_2()
+#endif
+
+#define HTM_GVL_START_CYCLES()						\
+    do {								\
+	uint64_t cycle;							\
+	store_clock(&cycle);						\
+	th->saved_cycle = cycle;					\
+	th->cycle_charging_target = NULL;				\
+	HTM_GVL_DEBUG_CYCLES_2();					\
+    } while (0)
+#define HTM_GVL_CHARGE_CYCLES_TO_SAVED_TARGET()				\
+    do {								\
+	uint64_t cycle;							\
+	store_clock(&cycle);						\
+	if (th->cycle_charging_target != NULL)				\
+	    *th->cycle_charging_target += cycle - th->saved_cycle;	\
+	HTM_GVL_DEBUG_CYCLES_1(saved);					\
+	th->saved_cycle = cycle;					\
+	th->cycle_charging_target = NULL;				\
+	HTM_GVL_DEBUG_CYCLES_2();					\
+    } while (0)
+#define HTM_GVL_CHARGE_CYCLES_TO(trgt)					\
+    do {								\
+	uint64_t cycle;							\
+	store_clock(&cycle);						\
+	if (th->saved_cycle != 0)					\
+	    th->cycle_stats.trgt += cycle - th->saved_cycle;		\
+	HTM_GVL_DEBUG_CYCLES_1(trgt);					\
+	th->saved_cycle = cycle;					\
+	th->cycle_charging_target = NULL;				\
+	HTM_GVL_DEBUG_CYCLES_2();					\
+    } while (0)
+#define HTM_GVL_CHARGE_CYCLES_TO_AND_START(trgt1, trgt2)		\
+    do {								\
+	uint64_t cycle;							\
+	store_clock(&cycle);						\
+	if (th->saved_cycle != 0)					\
+	    th->cycle_stats.trgt1 += cycle - th->saved_cycle;		\
+	HTM_GVL_DEBUG_CYCLES_1(trgt1);					\
+	th->saved_cycle = cycle;					\
+	th->cycle_charging_target = &th->cycle_stats.trgt2;		\
+	HTM_GVL_DEBUG_CYCLES_2();					\
+    } while (0)
+#define HTM_GVL_CHANGE_CYCLE_CHARGING_TO(trgt)				\
+    do {								\
+	th->cycle_charging_target = &th->cycle_stats.trgt;		\
+    } while (0)
+#else /* HTM_GVL && HTM_GVL_CYCLE_STATS */
+#define HTM_GVL_START_CYCLES()
+#define HTM_GVL_CHARGE_CYCLES_TO_SAVED_TARGET()
+#define HTM_GVL_CHARGE_CYCLES_TO(trgt)
+#define HTM_GVL_CHARGE_CYCLES_TO_AND_START(trgt1, trgt2)
+#define HTM_GVL_CHANGE_CYCLE_CHARGING_TO(trgt)
+#endif /* HTM_GVL && HTM_GVL_CYCLE_STATS */
+
+#ifdef HTM_GVL
+#define RUBY_VM_CHECK_INTS_EXEC_CORE(cntaddr) do {		\
+    if (UNLIKELY((self_th)->interrupt_flag)) {			\
+	rb_threadptr_execute_interrupts(self_th);		\
+    }								\
+    if (! use_gvl) {						\
+	thread_alone = rb_thread_alone_fast(self_th);		\
+	RUBY_VM_HTM_CHECK_SCHED(cntaddr);			\
+    }								\
+} while (0)
+
+#define RUBY_VM_HTM_CHECK_SCHED(cntaddr) do {				\
+    if (! use_gvl && ! thread_alone) {					\
+	local_schedule_counter = --self_th->htm_schedule_counter;	\
+	if (local_schedule_counter <= 0) {				\
+	    if (self_th->vm->gvl.acquired) {				\
+		gvl_release(self_th->vm, self_th);			\
+	    } else {							\
+		tend();							\
+		HTM_GVL_CHARGE_CYCLES_TO_AND_START(tx, between_tx);	\
+	    }								\
+	    htm_gvl_acquire_multi_threads(self_th, (cntaddr));		\
+	    rb_thread_set_current(th);					\
+	}								\
+    }									\
+} while (0)
+#endif
 
 #define RUBY_VM_CHECK_INTS_BLOCKING(th) do {				\
 	if (UNLIKELY(!rb_threadptr_pending_interrupt_empty_p(th))) {	\

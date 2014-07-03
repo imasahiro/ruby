@@ -939,6 +939,11 @@ void rb_mutex_allow_trap(VALUE self, int val);
 VALUE rb_uninterruptible(VALUE (*b_proc)(ANYARGS), VALUE data);
 VALUE rb_mutex_owned_p(VALUE self);
 void ruby_kill(rb_pid_t pid, int sig);
+#ifdef HTM_GVL
+int rb_thread_alone_fast(void *th);
+void gvl_release(void *vm, void *th);
+void htm_gvl_acquire_multi_threads(void *th, VALUE *counter_addr);
+#endif
 
 /* thread_pthread.c, thread_win32.c */
 void Init_native_thread(void);

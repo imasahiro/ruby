@@ -162,6 +162,7 @@ module WEBrick
         Thread.start{
           while true
             now = Time.now
+            TimeoutMutex.synchronie {
             @timeout_info.keys.each{|thread|
               ary = @timeout_info[thread]
               next unless ary
@@ -169,6 +170,7 @@ module WEBrick
                 time, exception = *info
                 interrupt(thread, info.object_id, exception) if time < now
               }
+            }
             }
             sleep 0.5
           end

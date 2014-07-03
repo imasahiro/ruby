@@ -599,6 +599,14 @@ rb_method_entry_get_without_cache(VALUE klass, ID id,
 	if (OPT_GLOBAL_METHOD_CACHE) {
 	    struct cache_entry *ent;
 	    ent = GLOBAL_METHOD_CACHE(klass, id);
+#ifdef ADAPTIVE_GLOBAL_METHOD_CACHE
+	    if (ent->mid != 0) {
+		if (UNDEFINED_METHOD_ENTRY_P(me)) {
+		    me = 0;
+		}
+		return me;
+	    }
+#endif
 	    ent->class_serial = RCLASS_SERIAL(klass);
 	    ent->method_state = GET_GLOBAL_METHOD_STATE();
 	    ent->defined_class = defined_class;

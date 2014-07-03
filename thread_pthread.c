@@ -1837,7 +1837,7 @@ timer_thread_sleep(rb_global_vm_lock_t* gvl)
 
     need_polling = check_signal_thread_list();
 
-    if (gvl->waiting > 0 || need_polling) {
+    if (gvl->waiting > 0 || need_polling || USE_SIMPLE_GVL_2) {
 	/* polling (TIME_QUANTUM_USEC usec) */
 	result = poll(pollfds, 1, TIME_QUANTUM_USEC/1000);
     }

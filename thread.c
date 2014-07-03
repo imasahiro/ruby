@@ -127,21 +127,49 @@ static inline void blocking_region_end(rb_thread_t *th, struct rb_blocking_regio
 #else
 #define RB_GC_SAVE_MACHINE_REGISTER_STACK(th)
 #endif
+#ifdef HTM_GVL
+#define REACH_GC_SAFE_POINT(th, cond) (th)->gc_safe_point_reached = cond
+/* Store-to-store barrier is needed. */
+#if defined(__370__)
+#define BARRIER()
+#elif defined(__PPC__) && defined(__IBMC__)
+#define BARRIER() __lwsync()
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define BARRIER() asm volatile("lwsync" : : )
+#elif defined(__GNUC__) || defined(__IBMC__)
+#define BARRIER() __sync_synchronize()
+#else
+#error
+#endif
+#else /* ! HTM_GVL */
+#define REACH_GC_SAFE_POINT(th, cond)
+#define BARRIER()
+#endif
+
 #define RB_GC_SAVE_MACHINE_CONTEXT(th)				\
     do {							\
 	FLUSH_REGISTER_WINDOWS;					\
 	RB_GC_SAVE_MACHINE_REGISTER_STACK(th);			\
+	BARRIER();\
+	REACH_GC_SAFE_POINT(th, 1);\
 	setjmp((th)->machine.regs);				\
 	SET_MACHINE_STACK_END(&(th)->machine.stack_end);	\
     } while (0)
 
+#ifdef HTM_GVL
+#define GVL_RELEASE(VM, TH) gvl_release(VM, TH)
+#else
+#define GVL_RELEASE(VM, TH) gvl_release(VM)
+#endif
+
 #define GVL_UNLOCK_BEGIN() do { \
   rb_thread_t *_th_stored = GET_THREAD(); \
   RB_GC_SAVE_MACHINE_CONTEXT(_th_stored); \
-  gvl_release(_th_stored->vm);
+  GVL_RELEASE(_th_stored->vm, _th_stored);
 
 #define GVL_UNLOCK_END() \
   gvl_acquire(_th_stored->vm, _th_stored); \
+  REACH_GC_SAFE_POINT(th, 0);\
   rb_thread_set_current(_th_stored); \
 } while(0)
 
@@ -724,7 +752,7 @@ thread_start_func_2(rb_thread_t *th, VALUE *stack_start, VALUE *register_stack_s
     th->vm->running_thread = NULL;
     native_mutex_unlock(&th->vm->thread_destruct_lock);
     thread_cleanup_func(th, FALSE);
-    gvl_release(th->vm);
+    GVL_RELEASE(th->vm, th);
 
     return 0;
 }
@@ -1297,7 +1325,7 @@ blocking_region_begin(rb_thread_t *th, struct rb_blocking_region_buffer *region,
 	th->status = THREAD_STOPPED;
 	thread_debug("enter blocking region (%p)\n", (void *)th);
 	RB_GC_SAVE_MACHINE_CONTEXT(th);
-	gvl_release(th->vm);
+	GVL_RELEASE(th->vm, th);
 	return TRUE;
     }
     else {
@@ -1308,6 +1336,7 @@ blocking_region_begin(rb_thread_t *th, struct rb_blocking_region_buffer *region,
 static inline void
 blocking_region_end(rb_thread_t *th, struct rb_blocking_region_buffer *region)
 {
+    REACH_GC_SAFE_POINT(th, 0);
     gvl_acquire(th->vm, th);
     rb_thread_set_current(th);
     thread_debug("leave blocking region (%p)\n", (void *)th);
@@ -1318,6 +1347,20 @@ blocking_region_end(rb_thread_t *th, struct rb_blocking_region_buffer *region)
 	th->status = region->prev_status;
     }
 }
+
+#ifdef HTM_GVL
+int
+rb_thread_alone_fast(void *ptr)
+{
+    rb_thread_t *th = (rb_thread_t *)ptr;
+    int num = 1;
+    if (th->vm->living_threads) {
+	num = th->vm->living_threads->num_entries;
+	thread_debug("rb_thread_alone: %d\n", num);
+    }
+    return num == 1;
+}
+#endif /* HTM_GVL */
 
 static void *
 call_without_gvl(void *(*func)(void *), void *data1,
@@ -3821,12 +3864,17 @@ timer_thread_function(void *arg)
      * vm->running_thread switch. however it guarantees th->running_thread
      * point to valid pointer or NULL.
      */
+#if RUBY_VM_THREAD_MODEL == 3
+    if (vm->use_gvl) {
+#endif
     native_mutex_lock(&vm->thread_destruct_lock);
     /* for time slice */
     if (vm->running_thread)
 	RUBY_VM_SET_TIMER_INTERRUPT(vm->running_thread);
     native_mutex_unlock(&vm->thread_destruct_lock);
-
+#if RUBY_VM_THREAD_MODEL == 3
+    }
+#endif
     /* check signal */
     rb_threadptr_check_signal(vm->main_thread);
 
@@ -3892,6 +3940,12 @@ rb_thread_atfork_internal(void (*atfork)(rb_thread_t *, const rb_thread_t *))
     rb_thread_t *th = GET_THREAD();
     rb_thread_t *i = 0;
     rb_vm_t *vm = th->vm;
+
+#ifdef ALIGN_RB_THREAD_T
+    void *th_before_aligned;
+    TypedData_Get_Struct(thval, rb_thread_t, &ruby_threadptr_data_type, th_before_aligned);
+    vm->main_thread_before_aligned = th_before_aligned;
+#endif
     vm->main_thread = th;
 
     gvl_atfork(th->vm);

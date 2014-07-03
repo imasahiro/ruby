@@ -1252,7 +1252,7 @@ static void TranslateLIR2C(TraceRecorder *Rec, CGen *gen,
             "SET_SP(basesp + %d);\n"
             "  ci->recv = v%ld;\n"
             "  v%ld = (*(ci)->call)(th, GET_CFP(), (ci));\n"
-            "  assert(v%ld != Qundef && \"method must c-defined method\");\n"
+            "  /*assert(v%ld != Qundef && \"method must c-defined method\");*/\n"
             "  SET_SP(basesp);\n"
             "}\n",
             ir->argc, lir_getid(ir->argv[0]), Id, Id);

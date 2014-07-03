@@ -6,6 +6,7 @@
   $Author$
 
   Copyright (C) 2004-2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -41,7 +42,11 @@ vm_stack_overflow_for_insn(void)
 #endif
 
 #if !OPT_CALL_THREADED_CODE
+#ifdef HTM_GVL
+VALUE
+#else
 static VALUE
+#endif
 vm_exec_core(rb_thread_t *th, VALUE initial)
 {
 
@@ -73,6 +78,12 @@ vm_exec_core(rb_thread_t *th, VALUE initial)
 #else
     register rb_control_frame_t *reg_cfp;
     VALUE *reg_pc;
+#endif
+#ifdef HTM_GVL
+    rb_thread_t *self_th = th ? th : GET_THREAD();
+    int thread_alone = rb_thread_alone_fast(self_th);
+    int use_gvl = self_th->vm->use_gvl;
+    int64_t local_schedule_counter;
 #endif
 
 #if USE_MACHINE_REGS

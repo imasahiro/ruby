@@ -5,6 +5,7 @@
   $Author$
 
   Copyright (C) 2004-2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -1798,8 +1799,27 @@ ruby_vm_destruct(rb_vm_t *vm)
 #endif
 	vm->main_thread = 0;
 	if (th) {
+#ifdef HTM_GVL
+#ifdef HTM_GVL_SUMMARY_STATS
+	    {
+		extern void accumulate_thr_htm_stats(rb_thread_t *th);
+		accumulate_thr_htm_stats(th);
+	    }
+#endif
+#ifdef HTM_GVL_CYCLE_STATS
+           {
+               extern void accumulate_thr_htm_cycle_stats(rb_thread_t *th);
+               accumulate_thr_htm_cycle_stats(th);
+           }
+#endif
+#endif
 	    rb_fiber_reset_root_local_storage(th->self);
+#if defined(ALIGN_RB_THREAD_T)
+	    thread_free(vm->main_thread_before_aligned);
+	    vm->main_thread_before_aligned = 0;
+#else
 	    thread_free(th);
+#endif
 	}
 	rb_vm_living_threads_init(vm);
 	ruby_vm_run_at_exit_hooks(vm);
@@ -1981,12 +2001,32 @@ thread_recycle_struct(void)
 #endif
 
 void
+#ifdef ALIGN_RB_THREAD_T
+rb_thread_mark_aligned(void *ptr, int aligned)
+#else
 rb_thread_mark(void *ptr)
+#endif
 {
     rb_thread_t *th = NULL;
     RUBY_MARK_ENTER("thread");
     if (ptr) {
+#if defined(ALIGN_RB_THREAD_T)
+	if (aligned) {
+#if defined(__370__)
+	    th = (rb_thread_t *)(((uintptr_t)ptr + 255) & ~255);
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+	    th = (rb_thread_t *)(((uintptr_t)ptr + 63) & ~63);
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+	    th = (rb_thread_t *)(((uintptr_t)ptr + 127) & ~127);
+#else
+#error
+#endif
+	} else {
+	    th = ptr;
+	}
+#else
 	th = ptr;
+#endif
 	if (th->stack) {
 	    VALUE *p = th->stack;
 	    VALUE *sp = th->cfp->sp;
@@ -2049,6 +2089,14 @@ rb_thread_mark(void *ptr)
     RUBY_MARK_LEAVE("thread");
 }
 
+#ifdef ALIGN_RB_THREAD_T
+void
+rb_thread_mark(void *ptr)
+{
+    rb_thread_mark_aligned(ptr, 1);
+}
+#endif
+
 static void
 thread_free(void *ptr)
 {
@@ -2056,7 +2104,19 @@ thread_free(void *ptr)
     RUBY_FREE_ENTER("thread");
 
     if (ptr) {
+#if defined(ALIGN_RB_THREAD_T)
+#if defined(__370__)
+	th = (rb_thread_t *)(((uintptr_t)ptr + 255) & ~255);
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+	th = (rb_thread_t *)(((uintptr_t)ptr + 63) & ~63);
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+	th = (rb_thread_t *)(((uintptr_t)ptr + 127) & ~127);
+#else
+#error
+#endif
+#else
 	th = ptr;
+#endif
 
 	if (!th->root_fiber) {
 	    RUBY_FREE_UNLESS_NULL(th->stack);
@@ -2084,8 +2144,10 @@ thread_free(void *ptr)
 #endif
 	    ruby_xfree(ptr);
 	}
+#if RUBY_VM_THREAD_MODEL != 3
         if (ruby_current_thread == th)
             ruby_current_thread = NULL;
+#endif
     }
     RUBY_FREE_LEAVE("thread");
 }
@@ -2095,7 +2157,19 @@ thread_memsize(const void *ptr)
 {
     if (ptr) {
 	const rb_thread_t *th = ptr;
+#if defined(ALIGN_RB_THREAD_T)
+#if defined(__370__)
+	size_t size = sizeof(rb_thread_t) + 256 * 2;
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+	size_t size = sizeof(rb_thread_t) + 64 * 2;
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+	size_t size = sizeof(rb_thread_t) + 128 * 2;
+#else
+#error
+#endif
+#else
 	size_t size = sizeof(rb_thread_t);
+#endif
 
 	if (!th->root_fiber) {
 	    size += th->stack_size * sizeof(VALUE);
@@ -2141,7 +2215,11 @@ thread_alloc(VALUE klass)
     obj = TypedData_Wrap_Struct(klass, &thread_data_type, th);
 #else
     rb_thread_t *th;
+#if defined(ALIGN_RB_THREAD_T)
+    obj = TypedData_Make_Struct_Cache_Line_Aligned(klass, rb_thread_t, &thread_data_type, th);
+#else
     obj = TypedData_Make_Struct(klass, rb_thread_t, &thread_data_type, th);
+#endif
 #endif
     return obj;
 }
@@ -2150,6 +2228,9 @@ static void
 th_init(rb_thread_t *th, VALUE self)
 {
     th->self = self;
+#ifdef HTM_GVL
+    th->htm_schedule_counter = 1;
+#endif
 
     /* allocate thread stack */
 #ifdef USE_SIGALTSTACK
@@ -2831,6 +2912,14 @@ ruby_vm_debug_ptr(rb_vm_t *vm)
 {
     return &vm->debug;
 }
+
+#if RUBY_VM_THREAD_MODEL == 3
+int *
+ruby_vm_use_gvl_ptr(rb_vm_t *vm)
+{
+    return &vm->use_gvl;
+}
+#endif
 
 VALUE *
 rb_ruby_verbose_ptr(void)

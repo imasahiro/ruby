@@ -6,6 +6,7 @@
   created at: 04/01/01 03:42:15 JST
 
   Copyright (C) 2004-2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -1651,6 +1652,14 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
     iseq->iseq = (void *)generated_iseq;
     iseq->iseq_size = pos;
     iseq->stack_max = stack_max;
+#ifdef HTM_GVL
+    iseq->htm_counters = ALLOC_N(int64_t, pos);
+    MEMZERO(iseq->htm_counters, int64_t, pos);
+#ifdef HTM_GVL_INSN_STATS
+    iseq->htm_insn_stats_counters = ALLOC_N(htm_insn_stats_t, pos);
+    MEMZERO(iseq->htm_insn_stats_counters, htm_insn_stats_t, pos);
+#endif
+#endif
 
     line_info_table = ruby_xrealloc(line_info_table, k * sizeof(struct iseq_line_info_entry));
     iseq->line_info_table = line_info_table;

@@ -5,6 +5,7 @@
   $Author$
 
   Copyright (C) 2004-2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -36,7 +37,11 @@ typedef struct native_thread_data_struct {
 
 typedef struct rb_global_vm_lock_struct {
     /* fast path */
+#if defined(USE_SIMPLE_GVL_2)
+    volatile unsigned long acquired;
+#else
     unsigned long acquired;
+#endif
     pthread_mutex_t lock;
 
     /* slow path */

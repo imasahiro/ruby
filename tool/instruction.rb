@@ -807,6 +807,18 @@ class RubyVM
     end
 
     def make_header_pc insn
+      if insn.name == "send" ||
+          insn.name == "getinstancevariable" ||
+          insn.name == "getclassvariable" ||
+          insn.name == "send" ||
+          insn.name == "getlocal" ||
+          insn.name == "opt_plus" ||
+          insn.name == "opt_minus" ||
+          insn.name == "opt_mult" ||
+          insn.name == "opt_aref"
+      then
+        commit "#if defined(HTM_GVL)\n  RUBY_VM_HTM_CHECK_SCHED(&GET_OPERAND(0));\n#endif"
+      end
       commit  "  ADD_PC(1+#{@opn});"
       commit  "  PREFETCH(GET_PC());"
     end

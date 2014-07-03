@@ -6,13 +6,20 @@
   created at: 04/01/01 19:41:38 JST
 
   Copyright (C) 2004-2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
 #ifndef RUBY_VM_CORE_H
 #define RUBY_VM_CORE_H
 
+#ifdef HTM_GVL
+#if ! defined(RUBY_VM_THREAD_MODEL)
+#define RUBY_VM_THREAD_MODEL 3
+#endif
+#else
 #define RUBY_VM_THREAD_MODEL 2
+#endif
 
 #include "ruby/ruby.h"
 #include "ruby/st.h"
@@ -30,6 +37,34 @@
 #include "thread_win32.h"
 #elif defined(HAVE_PTHREAD_H)
 #include "thread_pthread.h"
+#endif
+
+#ifdef HTM_GVL
+#include "htm_util.h"
+#endif
+
+#ifdef HTM_GVL
+#define HTM_WAIT_AND_SEE_PERIOD 300
+
+#define HTM_GVL_SUMMARY_STATS
+
+/*#define HTM_GVL_CYCLE_STATS*/
+
+#define USE_SIMPLE_GVL_2
+
+/* Enabled only for HTM */
+#define USE_TABLE_FOR_IC_IVAR
+#define ADAPTIVE_INLINE_METHOD_CACHE  /* This is not adaptive in fact, for now. */
+#define ADAPTIVE_GLOBAL_METHOD_CACHE  /* This is not adaptive in fact, for now. */
+
+#define USE_THREAD_LOCAL_HEAP
+
+#define ALIGN_RB_THREAD_T
+
+#endif /* HTM_GVL */
+
+#if defined(USE_SIMPLE_GVL_2)
+extern int rb_gvl_spin_max;
 #endif
 
 #ifndef ENABLE_VM_OBJSPACE
@@ -209,6 +244,9 @@ struct rb_iseq_struct {
 
     VALUE *iseq;         /* iseq (insn number and operands) */
     VALUE *iseq_encoded; /* encoded iseq */
+#ifdef HTM_GVL
+    int64_t *htm_counters;
+#endif
     unsigned long iseq_size;
     const VALUE mark_ary;     /* Array: includes operands which should be GC marked */
     const VALUE coverage;     /* coverage array */
@@ -455,8 +493,29 @@ typedef struct rb_block_struct {
 
 extern const rb_data_type_t ruby_threadptr_data_type;
 
+#if defined(ALIGN_RB_THREAD_T)
+#if defined(__370__)
+#define GetThreadPtr(obj, ptr) do {					\
+	TypedData_Get_Struct((obj), rb_thread_t, &ruby_threadptr_data_type, (ptr)); \
+	(ptr) = (rb_thread_t *)(((uintptr_t)(ptr) + 255) & ~255);	\
+    } while (0)
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+#define GetThreadPtr(obj, ptr) do {					\
+	TypedData_Get_Struct((obj), rb_thread_t, &ruby_threadptr_data_type, (ptr)); \
+	(ptr) = (rb_thread_t *)(((uintptr_t)(ptr) + 63) & ~63);	\
+    } while (0)
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define GetThreadPtr(obj, ptr) do {					\
+	TypedData_Get_Struct((obj), rb_thread_t, &ruby_threadptr_data_type, (ptr)); \
+	(ptr) = (rb_thread_t *)(((uintptr_t)(ptr) + 127) & ~127);	\
+    } while (0)
+#else
+#error
+#endif
+#else
 #define GetThreadPtr(obj, ptr) \
     TypedData_Get_Struct((obj), rb_thread_t, &ruby_threadptr_data_type, (ptr))
+#endif
 
 enum rb_thread_status {
     THREAD_RUNNABLE,
@@ -513,6 +572,12 @@ typedef struct rb_thread_struct {
     struct list_node vmlt_node;
     VALUE self;
     rb_vm_t *vm;
+#ifdef HTM_GVL
+    int htm_schedule_counter;
+#endif
+#ifdef USE_THREAD_LOCAL_HEAP
+    void *tlh_free_list;
+#endif
 
     /* execution information */
     VALUE *stack;		/* must free, must mark */
@@ -644,6 +709,20 @@ typedef struct rb_thread_struct {
     void *altstack;
 #endif
     unsigned long running_time_us;
+#ifdef HTM_GVL
+    volatile int gc_safe_point_reached;
+    TransactionDiagnosticInfo diag;
+#ifdef HTM_GVL_SUMMARY_STATS
+    rb_htm_stats_t htm_stats;
+#endif
+#ifdef HTM_GVL_CYCLE_STATS
+    const char *saved_file;
+    int saved_line;
+    uint64_t saved_cycle;
+    unsigned long long *cycle_charging_target;
+    rb_htm_cycle_stats_t cycle_stats;
+#endif
+#endif
 } rb_thread_t;
 
 typedef enum {
@@ -955,6 +1034,24 @@ GET_THREAD(void)
     } \
     rb_thread_set_current_raw(th); \
     (th)->vm->running_thread = (th); \
+} while (0)
+
+#elif RUBY_VM_THREAD_MODEL == 3
+RUBY_EXTERN rb_thread_t *ruby_current_thread;
+extern rb_vm_t *ruby_current_vm;
+extern rb_thread_t *ruby_thread_from_native(void);
+
+#define GET_VM() ruby_current_vm
+#define GET_THREAD() ruby_thread_from_native()
+#define rb_thread_set_current_raw(th) (void)(ruby_current_thread = (th))
+#define rb_thread_set_current(th) do {				\
+    if ((th)->vm->use_gvl) {					\
+	if ((th)->vm->running_thread != (th)) {			\
+	    (th)->vm->running_thread->running_time_us = 0;	\
+	}							\
+	rb_thread_set_current_raw(th);				\
+	(th)->vm->running_thread = (th);			\
+    }								\
 } while (0)
 
 #else

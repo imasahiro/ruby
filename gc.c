@@ -8,6 +8,7 @@
   Copyright (C) 1993-2007 Yukihiro Matsumoto
   Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
   Copyright (C) 2000  Information-technology Promotion Agency, Japan
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -175,6 +176,7 @@ static ruby_gc_params_t gc_params = {
 #if defined(ENABLE_VM_OBJSPACE) && ENABLE_VM_OBJSPACE
     FALSE,
 #endif
+    FALSE,
 };
 
 /* GC_DEBUG:
@@ -1314,6 +1316,11 @@ heap_get_freeobj(rb_objspace_t *objspace, rb_heap_t *heap)
 	else {
 	    p = heap_get_freeobj_from_next_freepage(objspace, heap);
 	}
+    }
+
+    no_shrink_heap_ptr = getenv("RUBY_DO_NOT_SHRINK_HEAP");
+    if (no_shrink_heap_ptr) {
+	do_not_shrink_heap = TRUE;
     }
 }
 
@@ -3382,6 +3389,18 @@ mark_locations_array(rb_objspace_t *objspace, register const VALUE *x, register 
 	x++;
     }
 }
+
+#ifdef USE_THREAD_LOCAL_HEAP
+static int
+thread_free_tlh(st_data_t key, st_data_t val, st_data_t data)
+{
+    rb_thread_t *th;
+    GetThreadPtr((VALUE)key, th);
+    th->tlh_free_list = NULL;
+
+    return ST_CONTINUE;
+}
+#endif
 
 static void
 gc_mark_locations(rb_objspace_t *objspace, const VALUE *start, const VALUE *end)

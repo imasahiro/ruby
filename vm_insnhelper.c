@@ -5,6 +5,7 @@
   $Author$
 
   Copyright (C) 2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -486,7 +487,11 @@ vm_search_const_defined_class(const VALUE cbase, ID id)
 }
 
 #ifndef USE_IC_FOR_IVAR
+#if defined(HTM_GVL) && ! defined(USE_TABLE_FOR_IC_IVAR)
+#define USE_IC_FOR_IVAR 0
+#else
 #define USE_IC_FOR_IVAR 1
+#endif
 #endif
 
 static inline VALUE

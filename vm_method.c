@@ -1,5 +1,6 @@
 /*
  * This file is included by vm.c
+  Copyright (c) IBM Corp. 2014.
  */
 
 #if OPT_GLOBAL_METHOD_CACHE

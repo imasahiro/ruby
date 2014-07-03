@@ -6,6 +6,7 @@
   created at: Tue May 17 11:42:20 JST 2011
 
   Copyright (C) 2011 Yukihiro Matsumoto
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -955,6 +956,9 @@ void rb_thread_recycle_stack_release(VALUE *);
 void rb_vm_change_state(void);
 void rb_vm_inc_const_missing_count(void);
 void rb_thread_mark(void *th);
+#ifdef ALIGN_RB_THREAD_T
+void rb_thread_mark_aligned(void *th, int aligned);
+#endif
 const void **rb_vm_get_insns_address_table(void);
 VALUE rb_sourcefilename(void);
 void rb_vm_pop_cfunc_frame(void);

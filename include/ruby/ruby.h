@@ -8,6 +8,7 @@
   Copyright (C) 1993-2008 Yukihiro Matsumoto
   Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
   Copyright (C) 2000  Information-technology Promotion Agency, Japan
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -1014,6 +1015,34 @@ void *rb_check_typeddata(VALUE, const rb_data_type_t *);
     TypedData_Wrap_Struct((klass),(data_type),(sval))\
 )
 
+/* We should #ifdef ALIGN_RB_THREAD_T,
+   but this file does not include vm_core.h. */
+#if defined(__370__)
+#define TypedData_Make_Struct_Cache_Line_Aligned(klass, type, data_type, sval) (\
+    (sval) = ALLOC_With_Cache_Line_Padding(type),\
+    memset((sval), 0, sizeof(type) + 256 * 2),\
+    TypedData_Wrap_Struct((klass),(data_type),(sval))\
+)
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+#define TypedData_Make_Struct_Cache_Line_Aligned(klass, type, data_type, sval) (\
+    (sval) = ALLOC_With_Cache_Line_Padding(type),\
+    memset((sval), 0, sizeof(type) + 64 * 2),\
+    TypedData_Wrap_Struct((klass),(data_type),(sval))\
+)
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define TypedData_Make_Struct_Cache_Line_Aligned(klass, type, data_type, sval) (\
+    (sval) = ALLOC_With_Cache_Line_Padding(type),\
+    memset((sval), 0, sizeof(type) + 128 * 2),\
+    TypedData_Wrap_Struct((klass),(data_type),(sval))\
+)
+#else
+#define TypedData_Make_Struct_Cache_Line_Aligned(klass, type, data_type, sval) (\
+    (sval) = ALLOC(type),\
+    memset((sval), 0, sizeof(type)),\
+    TypedData_Wrap_Struct((klass),(data_type),(sval))\
+)
+#endif
+
 #define Data_Get_Struct(obj,type,sval) do {\
     Check_Type((obj), T_DATA); \
     (sval) = (type*)DATA_PTR(obj);\
@@ -1270,6 +1299,17 @@ rb_num2char_inline(VALUE x)
 
 #define ALLOC_N(type,n) ((type*)xmalloc2((n),sizeof(type)))
 #define ALLOC(type) ((type*)xmalloc(sizeof(type)))
+/* We should #ifdef ALIGN_RB_THREAD_T,
+   but this file does not include vm_core.h. */
+#if defined(__370__)
+#define ALLOC_With_Cache_Line_Padding(type) ((type*)xmalloc(sizeof(type) + 256 * 2))
+#elif defined(__x86_64__) || defined(__CYGWIN__)
+#define ALLOC_With_Cache_Line_Padding(type) ((type*)xmalloc(sizeof(type) + 64 * 2))
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define ALLOC_With_Cache_Line_Padding(type) ((type*)xmalloc(sizeof(type) + 128 * 2))
+#else
+#define ALLOC_With_Cache_Line_Padding(type) ((type*)xmalloc(sizeof(type)))
+#endif
 #define REALLOC_N(var,type,n) ((var)=(type*)xrealloc2((char*)(var),(n),sizeof(type)))
 
 #define ALLOCA_N(type,n) ((type*)alloca(sizeof(type)*(n)))
@@ -1411,8 +1451,11 @@ VALUE rb_equal(VALUE,VALUE);
 
 VALUE *rb_ruby_verbose_ptr(void);
 VALUE *rb_ruby_debug_ptr(void);
+int   *rb_ruby_use_gvl_ptr(void);
 #define ruby_verbose (*rb_ruby_verbose_ptr())
 #define ruby_debug   (*rb_ruby_debug_ptr())
+#define ruby_use_gvl (*rb_ruby_use_gvl_ptr())
+
 
 PRINTF_ARGS(NORETURN(void rb_raise(VALUE, const char*, ...)), 2, 3);
 PRINTF_ARGS(NORETURN(void rb_fatal(const char*, ...)), 1, 2);

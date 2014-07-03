@@ -6,6 +6,7 @@
   created at: 2006-07-11(Tue) 09:00:03 +0900
 
   Copyright (C) 2006 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -60,6 +61,51 @@ compile_data_free(struct iseq_compile_data *compile_data)
     }
 }
 
+#ifdef HTM_GVL
+void
+iseq_get_insn_counters(int64_t *counter_addr, uint32_t *counter0, uint32_t *counter1, uint32_t *counter2)
+{
+    uint32_t *counter1_addr;
+    uint32_t *counter2_addr;
+
+    counter1_addr = (uint32_t *)counter_addr + 1;
+    counter2_addr = (uint32_t *)counter_addr;
+
+    *counter0 = *counter2_addr & 0xFF;
+    *counter1 = *counter1_addr;
+    *counter2 = *counter2_addr >> 8;
+}
+
+void
+iseq_print_counter(int64_t *counter_addr, const char *insn_name, rb_iseq_t *iseq, int pos)
+{
+    uint32_t counter0;
+    uint32_t counter1;
+    uint32_t counter2;
+
+#ifdef HTM_GVL_INSN_STATS
+    htm_insn_stats_t *insn_stats_counter;
+    extern htm_insn_stats_t htm_insn_stats_counter_for_null;
+    if (pos == -1) {
+	insn_stats_counter = &htm_insn_stats_counter_for_null;
+    } else {
+	insn_stats_counter = &iseq->htm_insn_stats_counters[pos];
+    }
+#endif
+
+    iseq_get_insn_counters(counter_addr, &counter0, &counter1, &counter2);
+    fprintf(stderr, "#HTM_INSN_STATS %p %p %s %u %u %u"
+#ifndef HTM_GVL_INSN_STATS
+	    "\n"
+#endif
+	    , iseq, counter_addr, insn_name, counter0, counter1, counter2);
+    /*fprintf(stderr, "%s %u\n", insn_name(iseq->iseq[pos]), (uint32_t)(counter >> 32));*/
+#ifdef HTM_GVL_INSN_STATS
+    fprintf(stderr, "  %u %u\n", insn_stats_counter->c32.c0, insn_stats_counter->c32.c1);
+#endif
+}
+#endif
+
 static void
 iseq_free(void *ptr)
 {
@@ -68,6 +114,79 @@ iseq_free(void *ptr)
 
     if (ptr) {
 	iseq = ptr;
+#ifdef HTM_GVL
+	if (getenv("RUBY_PRINT_HTM_INSN_STATS") ||
+	    getenv("RH_ISTATS")) {
+	    size_t i;
+	    uint64_t sum_counter1 = 0, sum_counter2 = 0;
+	    for (i = 1; i < iseq->insn_info_size; i++) {
+		int pos = iseq->insn_info_table[i].position;
+		int offset = 0;
+		switch (iseq->iseq[pos]) {
+		case BIN(getlocal):
+		    offset = 2;
+		    break;
+		case BIN(getinstancevariable):
+		    offset = 3;
+		    break;
+		case BIN(getclassvariable):
+		    offset = 2;
+		    break;
+		case BIN(send):
+		    offset = 6;
+		    break;
+		case BIN(leave):
+		    offset = 1;
+		    break;
+		case BIN(throw):
+		    offset = 2;
+		    break;
+		case BIN(jump):
+		    offset = 2;
+		    break;
+		case BIN(branchif):
+		    offset = 2;
+		    break;
+		case BIN(branchunless):
+		    offset = 2;
+		    break;
+		case BIN(onceinlinecache):
+		    offset = 3;
+		    break;
+		case BIN(opt_plus):
+		    offset = 2;
+		    break;
+		case BIN(opt_minus):
+		    offset = 2;
+		    break;
+		case BIN(opt_mult):
+		    offset = 2;
+		    break;
+		case BIN(opt_aref):
+		    offset = 2;
+		    break;
+		}
+		if (offset != 0) {
+		    int64_t *counter_addr = &iseq->htm_counters[pos];
+		    uint32_t counter0;
+		    uint32_t counter1;
+		    uint32_t counter2;
+
+		    iseq_print_counter(counter_addr, insn_name(iseq->iseq[pos]), iseq, pos);
+		    iseq_get_insn_counters(counter_addr, &counter0, &counter1, &counter2);
+
+		    sum_counter1 += counter1;
+		    sum_counter2 += counter2;
+		} else {
+		    fprintf(stderr, "#HTM_INSN_STATS %p %p %s 0 0 0\n", iseq, &iseq->iseq_encoded[pos], insn_name(iseq->iseq[pos]));
+		}
+	    }
+	    fprintf(stderr, "#HTM_INSN_STATS ISEQ %p %" PRIu64 " %" PRIu64 "\n",
+		    iseq, sum_counter1, sum_counter2
+		    /*, RSTRING_PTR(iseq->name)*/
+		    /*, !NIL_P(iseq->filename) ? RSTRING_PTR(iseq->filename) : "null"*/);
+	}
+#endif
 	if (!iseq->orig) {
 	    /* It's possible that strings are freed */
 	    if (0) {

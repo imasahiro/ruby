@@ -6,12 +6,13 @@
   created at: Thu May 23 09:03:43 2007
 
   Copyright (C) 2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
 #include "ruby/ruby.h"
-#include "internal.h"
 #include "vm_core.h"
+#include "internal.h"
 #include "gc.h"
 #include "eval_intern.h"
 
@@ -183,7 +184,14 @@ cont_mark(void *ptr)
     if (ptr) {
 	rb_context_t *cont = ptr;
 	rb_gc_mark(cont->value);
+#ifdef HTM_GVL
+	cont->saved_thread.gc_safe_point_reached = 1;
+#endif
+#ifdef ALIGN_RB_THREAD_T
+	rb_thread_mark_aligned(&cont->saved_thread, 0);
+#else
 	rb_thread_mark(&cont->saved_thread);
+#endif
 	rb_gc_mark(cont->saved_thread.self);
 
 	if (cont->vm_stack) {

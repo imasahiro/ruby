@@ -946,6 +946,13 @@ AS_CASE(["$target_os"],
 AC_ARG_ENABLE(pthread,
        AS_HELP_STRING([--enable-pthread], [obsolete, and ignored]))
 
+AC_ARG_ENABLE(htm-gvl,
+       AS_HELP_STRING([--enable-htm-gvl], [use hardware transactional memory for GVL]),
+       [use_htm_gvl=$enableval])
+if test "$use_htm_gvl" = yes; then
+     RUBY_APPEND_OPTION(XCFLAGS, -DHTM_GVL)
+fi
+
 dnl Checks for libraries.
 AS_CASE(["$target_os"],[*bsd*|dragonfly*],[],[ac_cv_func_daemon=no])
 

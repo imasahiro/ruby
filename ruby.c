@@ -8,6 +8,7 @@
   Copyright (C) 1993-2007 Yukihiro Matsumoto
   Copyright (C) 2000  Network Applied Communication Laboratory, Inc.
   Copyright (C) 2000  Information-technology Promotion Agency, Japan
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -66,6 +67,9 @@ enum disable_flag_bits {
     disable_gems,
     disable_rubyopt,
     disable_flag_count
+#ifdef HTM_GVL
+    , disable_htm
+#endif
 };
 
 #define DUMP_BIT(bit) (1U << dump_##bit)
@@ -676,6 +680,9 @@ disable_option(const char *str, int len, void *arg)
 #define SET_WHEN_DISABLE(bit) SET_WHEN(#bit, DISABLE_BIT(bit), str, len)
     SET_WHEN_DISABLE(gems);
     SET_WHEN_DISABLE(rubyopt);
+#ifdef HTM_GVL
+    SET_WHEN_DISABLE(htm);
+#endif
     if (NAME_MATCH_P("all", str, len)) {
 	*(unsigned int *)arg = ~0U;
 	return;
@@ -1389,6 +1396,11 @@ process_options(int argc, char **argv, struct cmdline_options *opt)
     if (!(opt->disable & DISABLE_BIT(gems))) {
 	rb_define_module("Gem");
     }
+#ifdef HTM_GVL
+    if (opt->disable & DISABLE_BIT(htm)) {
+	ruby_use_gvl = 1;
+    }
+#endif
     ruby_init_prelude();
     ruby_set_argv(argc, argv);
     process_sflag(&opt->sflag);

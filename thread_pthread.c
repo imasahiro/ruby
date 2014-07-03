@@ -6,6 +6,7 @@
   $Author$
 
   Copyright (C) 2004-2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -32,6 +33,9 @@
 #endif
 #if defined(HAVE_SYS_TIME_H)
 #include <sys/time.h>
+#endif
+#if defined(HTM_GVL)
+#include <math.h>
 #endif
 
 static void native_mutex_lock(pthread_mutex_t *lock);
@@ -98,12 +102,390 @@ gvl_acquire_common(rb_vm_t *vm)
     vm->gvl.acquired = 1;
 }
 
+static inline void
+store_to_load_fence(void) {
+#if defined(__370__)
+    /* Nothing to do */
+#elif defined(__PPC__) && defined(__IBMC__)
+    __sync();
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+    asm volatile("sync" : : );
+#elif defined(__GNUC__) || defined(__IBMC__)
+    __sync_synchronize();
+#else
+#error
+#endif
+}
+
+static inline void
+store_to_store_fence(void) {
+#if defined(__370__)
+    /* Nothing to do */
+#elif defined(__PPC__) && defined(__IBMC__)
+    __lwsync();
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+    asm volatile("lwsync" : : );
+#elif defined(__GNUC__) || defined(__IBMC__)
+    __sync_synchronize();
+#else
+#error
+#endif
+}
+
+#ifdef USE_SIMPLE_GVL_2
+static int
+htm_fall_back_gvl_acquire(rb_vm_t *vm, rb_thread_t *th, int acquire)
+{
+    int spin_count = rb_gvl_spin_max;
+#ifdef __370__
+    unsigned long local_acquired;
+    unsigned long new_value = (unsigned long)th;
+#endif
+#ifdef HTM_GVL
+    RB_GC_SAVE_MACHINE_CONTEXT(th);
+#endif
+
+    /*fprintf(stderr, "thr %p start spinning on vm->gvl.waiting\n", th);*/
+    HTM_GVL_CHARGE_CYCLES_TO_SAVED_TARGET();
+    while (vm->gvl.acquired && --spin_count > 0)
+	;
+    if (! acquire && ! vm->gvl.acquired) {
+	HTM_GVL_CHARGE_CYCLES_TO(gvl_wait_spin);
+#ifdef HTM_GVL
+	th->gc_safe_point_reached = 0;
+#endif
+	return 0;
+    }
+ retry_acquiring_gvl:
+    if (spin_count <= 0)
+	spin_count = 1;
+#if defined(__370__)
+    local_acquired = 0;
+    while (cds((cds_t *)&local_acquired, (cds_t *)&vm->gvl.acquired, *(cds_t *)&new_value)) {
+	while (local_acquired = vm->gvl.acquired && --spin_count > 0)
+	    ;
+	if (spin_count <= 0)
+	    break;
+    }
+#elif defined(__GNUC__) || defined(__IBMC__)
+    while (__sync_val_compare_and_swap(&vm->gvl.acquired, 0, (unsigned long)th)) {
+	while (vm->gvl.acquired && --spin_count > 0)
+	    ;
+	if (spin_count <= 0)
+	    break;
+    }
+#else
+#error
+#endif
+    if (spin_count <= 0) {
+	native_mutex_lock(&vm->gvl.lock);
+	vm->gvl.waiting++;
+	/*fprintf(stderr, "thr %p increment vm->gvl.waiting to %d vm->gvl.acquired = %lx\n", th, vm->gvl.waiting, vm->gvl.acquired);*/
+	store_to_load_fence();
+	if (vm->gvl.acquired) {
+	    HTM_GVL_CHARGE_CYCLES_TO(gvl_wait_spin);
+	    native_cond_wait(&vm->gvl.cond, &vm->gvl.lock);
+	    HTM_GVL_CHARGE_CYCLES_TO(gvl_wait_sleep);
+	}
+	vm->gvl.waiting--;
+	/*fprintf(stderr, "thr %p decrement vm->gvl.waiting to %d\n", th, vm->gvl.waiting);*/
+	native_mutex_unlock(&vm->gvl.lock);
+	spin_count = rb_gvl_spin_max;
+	goto retry_acquiring_gvl;
+    } else {
+	HTM_GVL_CHARGE_CYCLES_TO_AND_START(gvl_wait_spin, gvl);
+    }
+    /*fprintf(stderr, "thr %p acquired vm->gvl.waiting\n", th);*/
+#ifdef HTM_GVL
+    th->gc_safe_point_reached = 0;
+#endif
+    return 1;
+}
+
+static void
+simple_gvl_release_2(rb_vm_t *vm, rb_thread_t *th)
+{
+    store_to_store_fence();
+    vm->gvl.acquired = 0;
+    store_to_load_fence();
+    /*fprintf(stderr, "thr %p look at vm->gvl.waiting as %d\n", th, vm->gvl.waiting);*/
+    if (vm->gvl.waiting > 0) {
+	native_mutex_lock(&vm->gvl.lock);
+	native_cond_signal(&vm->gvl.cond);
+	native_mutex_unlock(&vm->gvl.lock);
+    }
+}
+#endif
+
+#ifdef HTM_GVL
+#ifdef HTM_GVL_SUMMARY_STATS
+#define INCREMENT_STAT(field) th->htm_stats.field++;
+#else
+#define INCREMENT_STAT(field)
+#endif
+
+#define READ_FROM_COUNTER0(counter_addr)	\
+    ((*(uint32_t *)(counter_addr)) & 0xFF)
+
+#define WRITE_TO_COUNTER0(data, counter_addr)				\
+    do {								\
+	*(uint32_t *)(counter_addr) = (*(uint32_t *)(counter_addr) & ~0xFF) | (data); \
+    } while (0)
+
+#define READ_FROM_COUNTER1(counter_addr)	\
+    (*((uint32_t *)(counter_addr) + 1))
+
+#define WRITE_TO_COUNTER1(data, counter_addr)		\
+    do {						\
+	*((uint32_t *)(counter_addr) + 1) = (data);	\
+    } while (0)
+
+#define READ_FROM_COUNTER2(counter_addr)	\
+    ((*(uint32_t *)(counter_addr)) >> 8)
+
+#define WRITE_TO_COUNTER2(data, counter_addr)				\
+    do {								\
+	*(uint32_t *)(counter_addr) = (*(uint32_t *)(counter_addr) & 0xFF) | ((data) << 8); \
+    } while (0)
+
+#define GET_COUNTER0(counter02) ((counter02) & 0xFF)
+#define GET_COUNTER2(counter02) ((counter02) >> 8)
+
+#define READ_FROM_COUNTER02(counter_addr) \
+    (*(uint32_t *)(counter_addr))
+
+#define WRITE_TO_COUNTER02(counter0, counter2, counter_addr)		\
+    do {								\
+	*(uint32_t *)(counter_addr) = (counter2) << 8 | (counter0);	\
+    } while(0)
+
+#if defined(__370__)
+#define IS_PERSISTENT(reason, th) ((th)->diag.format != 1 || (reason) == 7 || (reason) == 8 || (11 <= (reason) && (reason) <= 13))
+#elif defined(__x86_64__)
+#define IS_PERSISTENT(reason, th) (! ((reason) & XABORT_RETRY))
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define IS_PERSISTENT(reason, th) ((reason) & 0x0100000000000000ULL)
+#endif
+
+int64_t htm_counter_for_null;
+
+void
+htm_gvl_acquire_multi_threads(void *ptr, VALUE *cnt_addr)
+{
+    rb_thread_t *th = (rb_thread_t *)ptr;
+    rb_vm_t *vm = th->vm;
+    int persistent_retry_count;
+    int transient_retry_count;
+    int gvl_retry_count;
+    int first_retry;
+    int tbegin_result;
+    int64_t *counter_addr;
+    uint32_t next_interval = 0;
+    uint32_t wait_and_see_counter = 0;
+    uint32_t tx_size_recalc_counter = 0;
+
+    if (cnt_addr == NULL) {
+	counter_addr = &htm_counter_for_null;
+    } else {
+	rb_iseq_t *iseq = th->cfp->iseq;
+	counter_addr = &iseq->htm_counters[cnt_addr - iseq->iseq_encoded];
+    }
+
+    if (rb_htm_schedule_interval > 0) {
+	th->htm_schedule_counter = rb_htm_schedule_interval;
+#if 0
+    } else if (rb_htm_schedule_interval == -1) {
+	uint32_t counter02;
+
+	counter02 = READ_FROM_COUNTER02(counter_addr);
+	next_interval = GET_COUNTER0(counter02);
+	if (next_interval == 0) {
+	    next_interval = 1;
+	    WRITE_TO_COUNTER02(next_interval, 1, counter_addr);
+	} else if (next_interval < 255) {
+	    tx_size_recalc_counter = READ_FROM_COUNTER1(counter_addr);
+	    if (tx_size_recalc_counter <= rb_htm_tx_size_recalc_threshold) {
+		wait_and_see_counter = GET_COUNTER2(counter02) + 1;
+		if (wait_and_see_counter >= HTM_WAIT_AND_SEE_PERIOD) {
+		    next_interval = (int)ceil((double)next_interval * 4 / 3);
+		    if (next_interval > 255)
+			next_interval = 255;
+		    wait_and_see_counter = 0;
+		    WRITE_TO_COUNTER1(0, counter_addr);
+		}
+		WRITE_TO_COUNTER02(next_interval, wait_and_see_counter, counter_addr);
+	    }
+	}
+	th->htm_schedule_counter = next_interval;
+#endif
+    } else {
+	uint32_t counter02;
+
+	counter02 = READ_FROM_COUNTER02(counter_addr);
+	next_interval = GET_COUNTER0(counter02);
+	if (next_interval == 0) {
+	    next_interval = -rb_htm_schedule_interval;
+	    WRITE_TO_COUNTER02(next_interval, 1, counter_addr);
+	} else if (1 < next_interval) {
+	    wait_and_see_counter = GET_COUNTER2(counter02);
+	    if (wait_and_see_counter < HTM_WAIT_AND_SEE_PERIOD) {
+		WRITE_TO_COUNTER02(next_interval, wait_and_see_counter + 1, counter_addr);
+	    }
+	}
+	th->htm_schedule_counter = next_interval;
+    }
+
+    INCREMENT_STAT(tx_enter);
+    if (vm->gvl.acquired) {
+	if (htm_fall_back_gvl_acquire(vm, th, 0)) {
+	    INCREMENT_STAT(gvl_wait_before_tx_sleep);
+	    return;
+	} else {
+	    INCREMENT_STAT(gvl_wait_before_tx_spin);
+	}
+    }
+    /*fprintf(stderr, "%p tbegin\n", th);*/
+    persistent_retry_count = rb_htm_persistent_retry_max;
+    transient_retry_count = rb_htm_transient_retry_max;
+    gvl_retry_count = rb_htm_gvl_retry_max;
+    first_retry = 1;
+    HTM_GVL_CHARGE_CYCLES_TO_AND_START(between_tx, tx);
+
+ tx_retry:
+    INCREMENT_STAT(tx);
+    tbegin_result = tbegin(&th->diag);
+    /*tbegin_result = 3;*/
+    if (tbegin_result == 0) {
+	/* tbegin succeeded */
+	if (vm->gvl.acquired)
+	    tabort(256);
+    } else {
+	/* transaction failed */
+	uint64_t reason = th->diag.transactionAbortCode;
+	INCREMENT_STAT(abort);
+	HTM_GVL_CHANGE_CYCLE_CHARGING_TO(abort);
+	if (first_retry) {
+	    first_retry = 0;
+	    INCREMENT_STAT(first_abort);
+	    if (rb_htm_schedule_interval == -1 /* Adaptive transaction size enlargement */ &&
+		next_interval < 255 /* Can enlarge the size */ &&
+		tx_size_recalc_counter <= rb_htm_tx_size_recalc_threshold /* Stats collection period */) {
+		WRITE_TO_COUNTER1(tx_size_recalc_counter + 1, counter_addr);
+	    } else if (rb_htm_schedule_interval < 0 /* Adaptive transaction size*/ &&
+		1 < next_interval /* Can shorten the size */ &&
+		wait_and_see_counter < HTM_WAIT_AND_SEE_PERIOD /* Stats collection period */) {
+		tx_size_recalc_counter = READ_FROM_COUNTER1(counter_addr) + 1;
+		/*tx_size_recalc_counter = READ_FROM_COUNTER1(counter_addr) + (IS_PERSISTENT(reason, th) ? 7 : 1);*/
+		if (tx_size_recalc_counter > rb_htm_tx_size_recalc_threshold) {
+		    next_interval = next_interval * 3 / 4;
+		    WRITE_TO_COUNTER0(next_interval, counter_addr);
+		    /* Reinitialize the stats counters. */
+		    WRITE_TO_COUNTER1(0, counter_addr);
+		    WRITE_TO_COUNTER2(0, counter_addr);
+		} else {
+		    WRITE_TO_COUNTER1(tx_size_recalc_counter, counter_addr);
+		}
+	    }
+	}
+
+	if (vm->gvl.acquired) {
+	    if (--gvl_retry_count > 0) {
+		if (htm_fall_back_gvl_acquire(vm, th, 0)) {
+		    INCREMENT_STAT(gvl_wait_and_retry_sleep);
+		    return;
+		} else {
+		    INCREMENT_STAT(gvl_wait_and_retry_spin);
+		}
+		HTM_GVL_CHARGE_CYCLES_TO_AND_START(abort, tx);
+		goto tx_retry;
+	    }
+	    INCREMENT_STAT(gvl_acquired);
+	    htm_fall_back_gvl_acquire(vm, th, 1);
+	} else {
+#ifdef HTM_GVL_SUMMARY_STATS
+#if defined(__370__)
+	    if (th->diag.format != 1) {
+		th->htm_stats.abort_reason_code[0][tbegin_result - 1]++;
+	    } else if (reason <= 16) {
+		th->htm_stats.abort_reason_code[reason][tbegin_result - 1]++;
+	    } else if (reason == 255) {
+		th->htm_stats.abort_reason_code[17][tbegin_result - 1]++;
+	    } else {
+		th->htm_stats.abort_reason_code[18][tbegin_result - 1]++;
+	    }
+#elif defined(__x86_64__)
+#define THCTR th->htm_stats.abort_reason_counters
+	    THCTR.XABORT                    += (reason & XABORT_EXPLICIT) ? 1L : 0L;
+	    THCTR.TRANSIENT                 += (reason & XABORT_RETRY) ? 1L : 0L;
+	    THCTR.MEMADDR_CONFLICT          += (reason & XABORT_CONFLICT) ? 1L : 0L;
+	    THCTR.BUFFER_OVERFLOW           += (reason & XABORT_CAPACITY) ? 1L : 0L;
+	    THCTR.HIT_DEBUG_BREAKPOINT      += (reason & XABORT_DEBUG) ? 1L : 0L;
+	    THCTR.DURING_NESTED_TRANSACTION += (reason & XABORT_NESTED) ? 1L : 0L;
+	    THCTR.OTHER                     += (reason & (XABORT_EXPLICIT | XABORT_RETRY | XABORT_CONFLICT | XABORT_CAPACITY | XABORT_DEBUG | XABORT_NESTED)) ? 0L : 1L;
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define THCTR th->htm_stats.abort_reason_counters
+#define PPC_BFIELD(x) ((0x1ULL) << (63 - x))
+	    THCTR.Failure_Persistent                += (reason & PPC_BFIELD( 7)) ? 1 : 0;
+	    THCTR.Disallowed                        += (reason & PPC_BFIELD( 8)) ? 1 : 0;
+	    THCTR.Nesting_Overflow                  += (reason & PPC_BFIELD( 9)) ? 1 : 0;
+	    THCTR.Footprint_Overflow                += (reason & PPC_BFIELD(10)) ? 1 : 0;
+	    THCTR.Self_Induced_Conflict             += (reason & PPC_BFIELD(11)) ? 1 : 0;
+	    THCTR.Non_Transactional_Conflict        += (reason & PPC_BFIELD(12)) ? 1 : 0;
+	    THCTR.Transaction_Conflict              += (reason & PPC_BFIELD(13)) ? 1 : 0;
+	    THCTR.Translation_Invalidation_Conflict += (reason & PPC_BFIELD(14)) ? 1 : 0;
+	    THCTR.Implementation_Specific           += (reason & PPC_BFIELD(15)) ? 1 : 0;
+	    THCTR.Instruction_Fetch_Conflict        += (reason & PPC_BFIELD(16)) ? 1 : 0;
+	    THCTR.Tabort_Treclaim                   += (reason & PPC_BFIELD(31)) ? 1 : 0;
+	    THCTR.Other                             += (reason & (PPC_BFIELD(7) | PPC_BFIELD(8) | PPC_BFIELD(9) | PPC_BFIELD(10) | PPC_BFIELD(11) | PPC_BFIELD(12) | PPC_BFIELD(13) | PPC_BFIELD(14) | PPC_BFIELD(15) | PPC_BFIELD(16) | PPC_BFIELD(31))) ? 0 : 1;
+#endif
+#endif
+	    /*if (tbegin_result == 3) {*/
+	    if (IS_PERSISTENT(reason, th)) {
+		if (--persistent_retry_count > 0) {
+		    INCREMENT_STAT(persistent_abort_retry);
+		    HTM_GVL_CHARGE_CYCLES_TO_AND_START(abort, tx);
+		    goto tx_retry;
+		}
+		/* persistent failure */
+		INCREMENT_STAT(gvl_persistent_abort);
+		htm_fall_back_gvl_acquire(vm, th, 1);
+	    } else
+	      {
+		if (--transient_retry_count > 0) {
+		    INCREMENT_STAT(transient_abort_retry);
+		    HTM_GVL_CHARGE_CYCLES_TO_AND_START(abort, tx);
+		    goto tx_retry;
+		}
+		INCREMENT_STAT(gvl_transient_abort);
+		htm_fall_back_gvl_acquire(vm, th, 1);
+	    }
+	}
+    }
+}
+#endif
+
 static void
 gvl_acquire(rb_vm_t *vm, rb_thread_t *th)
 {
+#if defined(USE_SIMPLE_GVL_2) && ! defined(HTM_GVL)
+    htm_fall_back_gvl_acquire(vm, th, 1);
+#else
+#if defined(HTM_GVL)
+    if (vm->use_gvl) {
+#endif
     native_mutex_lock(&vm->gvl.lock);
     gvl_acquire_common(vm);
     native_mutex_unlock(&vm->gvl.lock);
+#if defined(HTM_GVL)
+    } else {
+	if (rb_thread_alone()) {
+	    htm_fall_back_gvl_acquire(vm, th, 1);
+	} else {
+	    htm_gvl_acquire_multi_threads(th, NULL);
+	}
+    }
+#endif
+#endif
 }
 
 static void
@@ -114,17 +496,60 @@ gvl_release_common(rb_vm_t *vm)
 	native_cond_signal(&vm->gvl.cond);
 }
 
+#ifdef HTM_GVL
+void
+gvl_release(void *vm_ptr, void *th_ptr)
+#else
 static void
 gvl_release(rb_vm_t *vm)
+#endif
 {
+#if defined(USE_SIMPLE_GVL_2) && ! defined(HTM_GVL)
+    simple_gvl_release_2(vm, GET_THREAD());
+#else
+#if defined(HTM_GVL)
+    rb_vm_t *vm = (rb_vm_t *)vm_ptr;
+    if (vm->use_gvl) {
+#endif
     native_mutex_lock(&vm->gvl.lock);
     gvl_release_common(vm);
     native_mutex_unlock(&vm->gvl.lock);
+#if defined(HTM_GVL)
+    } else {
+	rb_thread_t *th = (rb_thread_t *)th_ptr;
+
+	if (vm->gvl.acquired) {
+#if defined (USE_SIMPLE_GVL_2)
+	    simple_gvl_release_2(vm, th);
+#else
+	    native_mutex_lock(&vm->gvl.lock);
+	    vm->gvl.acquired = 0;
+	    native_cond_signal(&vm->gvl.cond);
+	    /*native_cond_broadcast(&vm->gvl.cond);*/
+	    native_mutex_unlock(&vm->gvl.lock);
+#endif
+	    HTM_GVL_CHARGE_CYCLES_TO_AND_START(gvl, between_tx);
+	} else {
+	    tend();
+	    HTM_GVL_CHARGE_CYCLES_TO_AND_START(tx, between_tx);
+	    /*th->diag.reserved2 = 0;*/
+	}
+    }
+#endif /* HTM_GVL */
+#endif
 }
 
 static void
 gvl_yield(rb_vm_t *vm, rb_thread_t *th)
 {
+#if defined(USE_SIMPLE_GVL_2) && ! defined(HTM_GVL)
+    simple_gvl_release_2(vm, th);
+    sched_yield();
+    htm_fall_back_gvl_acquire(vm, th, 1);
+#else
+#if defined(HTM_GVL)
+    if (vm->use_gvl) {
+#endif
     native_mutex_lock(&vm->gvl.lock);
 
     gvl_release_common(vm);
@@ -154,6 +579,13 @@ gvl_yield(rb_vm_t *vm, rb_thread_t *th)
   acquire:
     gvl_acquire_common(vm);
     native_mutex_unlock(&vm->gvl.lock);
+#if defined(HTM_GVL)
+    } else {
+	gvl_release(vm, th);
+	gvl_acquire(vm, th);
+    }
+#endif /* HTM_GVL */
+#endif
 }
 
 static void
@@ -433,11 +865,19 @@ null_func(int i)
     /* null */
 }
 
+#if RUBY_VM_THREAD_MODEL == 3
+rb_thread_t *
+ruby_thread_from_native(void)
+{
+    return pthread_getspecific(ruby_native_thread_key);
+}
+#else
 static rb_thread_t *
 ruby_thread_from_native(void)
 {
     return pthread_getspecific(ruby_native_thread_key);
 }
+#endif
 
 static int
 ruby_thread_set_native(rb_thread_t *th)
@@ -450,7 +890,11 @@ static void native_thread_init(rb_thread_t *th);
 void
 Init_native_thread(void)
 {
+#if RUBY_VM_THREAD_MODEL == 3
+    rb_thread_t *th = ruby_current_thread;
+#else
     rb_thread_t *th = GET_THREAD();
+#endif
 
     pthread_key_create(&ruby_native_thread_key, NULL);
     th->thread_id = pthread_self();
@@ -805,6 +1249,7 @@ thread_start_func_1(void *th_ptr)
 #endif
 	native_thread_init(th);
 	/* run */
+	HTM_GVL_START_CYCLES();
 #if defined USE_NATIVE_THREAD_INIT
 	thread_start_func_2(th, th->machine.stack_start, rb_ia64_bsp());
 #else
@@ -1063,10 +1508,12 @@ native_sleep(rb_thread_t *th, struct timeval *timeout_tv)
 	    thread_debug("native_sleep: interrupted before sleep\n");
 	}
 	else {
+	    HTM_GVL_CHARGE_CYCLES_TO_SAVED_TARGET();
 	    if (!timeout_tv)
 		native_cond_wait(cond, lock);
 	    else
 		native_cond_timedwait(cond, lock, &timeout);
+	    HTM_GVL_CHARGE_CYCLES_TO_AND_START(native_sleep, between_tx);
 	}
 	th->unblock.func = 0;
 	th->unblock.arg = 0;

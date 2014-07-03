@@ -5,6 +5,7 @@
   $Author$
 
   Copyright (C) 2004-2007 Koichi Sasada
+  Copyright (c) IBM Corp. 2014.
 
 **********************************************************************/
 
@@ -310,7 +311,11 @@ rb_thread_debug(
 void
 rb_vm_gvl_destroy(rb_vm_t *vm)
 {
+#ifdef HTM_GVL
+    gvl_release(vm, GET_THREAD());
+#else
     gvl_release(vm);
+#endif
     gvl_destroy(vm);
     native_mutex_destroy(&vm->thread_destruct_lock);
 }
@@ -509,6 +514,63 @@ thread_cleanup_func_before_exec(void *th_ptr)
 #endif
 }
 
+#ifdef HTM_GVL
+#ifdef HTM_GVL_SUMMARY_STATS
+void
+accumulate_thr_htm_stats(rb_thread_t *th)
+{
+#if defined(__370__)
+    int i, j;
+#endif
+
+    th->vm->htm_stats.tx += th->htm_stats.tx;
+    th->vm->htm_stats.tx_enter += th->htm_stats.tx_enter;
+    th->vm->htm_stats.abort += th->htm_stats.abort;
+    th->vm->htm_stats.first_abort += th->htm_stats.first_abort;
+    th->vm->htm_stats.gvl_wait_before_tx_spin += th->htm_stats.gvl_wait_before_tx_spin;
+    th->vm->htm_stats.gvl_wait_before_tx_sleep += th->htm_stats.gvl_wait_before_tx_sleep;
+    th->vm->htm_stats.gvl_wait_and_retry_spin += th->htm_stats.gvl_wait_and_retry_spin;
+    th->vm->htm_stats.gvl_wait_and_retry_sleep += th->htm_stats.gvl_wait_and_retry_sleep;
+    th->vm->htm_stats.gvl_acquired += th->htm_stats.gvl_acquired;
+    th->vm->htm_stats.persistent_abort_retry += th->htm_stats.persistent_abort_retry;
+    th->vm->htm_stats.gvl_persistent_abort += th->htm_stats.gvl_persistent_abort;
+    th->vm->htm_stats.transient_abort_retry += th->htm_stats.transient_abort_retry;
+    th->vm->htm_stats.gvl_transient_abort += th->htm_stats.gvl_transient_abort;
+#if defined(__370__)
+    for (i = 0; i < 19; i++) {
+	for (j = 0; j < 3; j++) {
+	    th->vm->htm_stats.abort_reason_code[i][j] += th->htm_stats.abort_reason_code[i][j];
+	}
+    }
+#elif defined(__x86_64__)
+#define HTM_IA32_STAT(nam) th->vm->htm_stats.abort_reason_counters.nam += th->htm_stats.abort_reason_counters.nam;
+#include "htm_ia32_stat.h"
+#undef HTM_IA32_STAT
+#elif defined(__PPC__) || defined(_ARCH_PPC)
+#define HTM_PPC_STAT(nam) th->vm->htm_stats.abort_reason_counters.nam += th->htm_stats.abort_reason_counters.nam;
+#include "htm_ppc_stat.h"
+#undef HTM_PPC_STAT
+#else
+#error
+#endif
+}
+#endif
+#ifdef HTM_GVL_CYCLE_STATS
+void
+accumulate_thr_htm_cycle_stats(rb_thread_t *th)
+{
+    th->vm->cycle_stats.tx += th->cycle_stats.tx;
+    th->vm->cycle_stats.abort += th->cycle_stats.abort;
+    th->vm->cycle_stats.gvl_wait_spin += th->cycle_stats.gvl_wait_spin;
+    th->vm->cycle_stats.gvl_wait_sleep += th->cycle_stats.gvl_wait_sleep;
+    th->vm->cycle_stats.gvl += th->cycle_stats.gvl;
+    th->vm->cycle_stats.between_tx += th->cycle_stats.between_tx;
+    th->vm->cycle_stats.mutex_sleep += th->cycle_stats.mutex_sleep;
+    th->vm->cycle_stats.native_sleep += th->cycle_stats.native_sleep;
+}
+#endif
+#endif /* HTM_GVL */
+
 static void
 thread_cleanup_func(void *th_ptr, int atfork)
 {
@@ -527,6 +589,14 @@ thread_cleanup_func(void *th_ptr, int atfork)
 
     native_mutex_destroy(&th->interrupt_lock);
     native_thread_destroy(th);
+#ifdef HTM_GVL
+#ifdef HTM_GVL_SUMMARY_STATS
+    accumulate_thr_htm_stats(th);
+#endif
+#ifdef HTM_GVL_CYCLE_STATS
+    accumulate_thr_htm_cycle_stats(th);
+#endif
+#endif
 }
 
 static VALUE rb_threadptr_raise(rb_thread_t *, int, VALUE *);
@@ -4222,6 +4292,7 @@ lock_func(rb_thread_t *th, rb_mutex_t *mutex, int timeout_ms)
 	    break;
 	}
 
+	HTM_GVL_CHARGE_CYCLES_TO_SAVED_TARGET();
 	if (timeout_ms) {
 	    struct timespec timeout_rel;
 	    struct timespec timeout;
@@ -4235,6 +4306,7 @@ lock_func(rb_thread_t *th, rb_mutex_t *mutex, int timeout_ms)
 	    native_cond_wait(&mutex->cond, &mutex->lock);
 	    err = 0;
 	}
+	HTM_GVL_CHARGE_CYCLES_TO_AND_START(mutex_sleep, between_tx);
     }
     mutex->cond_waiting--;
 
@@ -5062,6 +5134,7 @@ Init_Thread(void)
 	{
 	    /* acquire global vm lock */
 	    gvl_init(th->vm);
+	    HTM_GVL_START_CYCLES();
 	    gvl_acquire(th->vm, th);
 	    native_mutex_initialize(&th->vm->thread_destruct_lock);
 	    native_mutex_initialize(&th->interrupt_lock);

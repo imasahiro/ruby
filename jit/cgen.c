@@ -443,12 +443,19 @@ static void trace_freeze(TraceRecorder *Rec, Trace *trace)
     //}
 }
 
-int trace_sideexit_size(Trace *trace)
+static void trace_patch(TraceRecorder *Rec, Trace *trace)
+{
+    if (trace->Code == (void *) 0xdeadbeaf || trace->Code == NULL) {
+        return;
+    }
+}
+
+static int trace_sideexit_size(Trace *trace)
 {
     return hashmap_size(&trace->StackMap);
 }
 
-static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace)
+static native_func_t trace_compile(TraceRecorder *Rec, Trace *trace)
 {
     static int serial_id = 0;
     char path[128] = {};

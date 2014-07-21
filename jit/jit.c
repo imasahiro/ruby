@@ -231,7 +231,7 @@ typedef TraceExitStatus (*native_func_t)(rb_thread_t *th,
                                          rb_control_frame_t *reg_cfp,
                                          VALUE *reg_pc, VALUE **exit_pc);
 
-static native_func_t TranslateToNativeCode(TraceRecorder *Rec, Trace *trace);
+static native_func_t trace_compile(TraceRecorder *Rec, Trace *trace);
 
 struct RJit {
     VALUE self;
@@ -760,7 +760,7 @@ static void SubmitToCompilation(RJit *jit, TraceRecorder *Rec)
         Trace *trace = TraceRecorderGetTrace(Rec);
         trace_optimize(Rec, trace);
         dump_lir(Rec);
-        TranslateToNativeCode(Rec, trace);
+        trace_compile(Rec, trace);
     }
     jit->CurrentTrace = NULL;
     TraceRecorderClear(Rec, 0);

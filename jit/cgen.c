@@ -73,7 +73,7 @@ static void gwjit_context_init()
     jit_host_context._rb_out_of_int = rb_out_of_int;
 #endif
     jit_host_context._ruby_current_vm = ruby_current_vm;
-    jit_host_context._ruby_vm_redefined_flag = ruby_vm_redefined_flag;
+    jit_host_context._ruby_vm_redefined_flag = GET_VM()->redefined_flag;
     jit_host_context._jit_vm_redefined_flag = jit_vm_redefined_flag;
     jit_host_context._ruby_vm_global_method_state
         = ruby_vm_global_method_state_ptr;
